@@ -59,6 +59,6 @@ async fn main() {
 
     // Run it
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    println!("Listening on {}", listener.local_addr().unwrap());
+    tracing::info!("Listening on {}", listener.local_addr().unwrap());
     axum::serve(listener, app).await.unwrap();
 }

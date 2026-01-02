@@ -2,8 +2,8 @@ use crate::events::{Event, MessageEvent};
 use crate::llm::LLM;
 use crate::prompts::SYSTEM_PROMPT;
 use crate::runtime::Runtime;
+use colored::*;
 use genai::chat::{ChatMessage, ChatRole, ContentPart, ToolCall, ToolResponse};
-use owo_colors::OwoColorize;
 use tracing::{error, info};
 
 pub struct Agent {
@@ -109,7 +109,7 @@ impl Agent {
 
                     info!(
                         "Agent executing tool: {} with args: {}",
-                        fn_name.bright_cyan(),
+                        fn_name.cyan(),
                         fn_args.to_string().dimmed()
                     );
 
@@ -125,7 +125,7 @@ impl Agent {
 
                     info!(
                         "Agent tool output ({}): {}",
-                        fn_name.bright_cyan(),
+                        fn_name.cyan(),
                         output_content.dimmed()
                     );
 
