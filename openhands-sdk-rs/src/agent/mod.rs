@@ -1,6 +1,9 @@
+pub mod prompts;
+pub mod tools;
+
+use self::prompts::SYSTEM_PROMPT;
 use crate::events::{Event, MessageEvent};
 use crate::llm::LLM;
-use crate::prompts::SYSTEM_PROMPT;
 use crate::runtime::Runtime;
 use colored::*;
 use genai::chat::{ChatMessage, ChatRole, ContentPart, ToolCall, ToolResponse};
@@ -199,7 +202,6 @@ mod tests {
             return;
         }
 
-        use crate::tools::CmdTool;
         let config = LLMConfig {
             model: "gpt-5-nano".to_string(),
             api_key,
@@ -212,6 +214,7 @@ mod tests {
         );
 
         // Runtime with CmdTool
+        use crate::agent::tools::CmdTool;
         use crate::runtime::LocalRuntime;
         let mut runtime = LocalRuntime::new(vec![Box::new(CmdTool)]);
 

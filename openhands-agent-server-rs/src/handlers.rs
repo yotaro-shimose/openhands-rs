@@ -7,8 +7,8 @@ use axum::{
 use openhands_sdk_rs::models::{
     BashEvent, BashOutput, ExecuteBashRequest, FileReadRequest, FileWriteRequest,
 };
-use openhands_sdk_rs::services::bash::BashEventService;
-use openhands_sdk_rs::services::file::FileService;
+use openhands_sdk_rs::runtime::bash::BashEventService;
+use openhands_sdk_rs::runtime::file::FileService;
 use openhands_sdk_rs::system;
 use serde::Deserialize;
 use serde_json::json;
