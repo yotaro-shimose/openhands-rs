@@ -56,7 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // 5. Run Step
     // In a real app, this would be a loop. For this demo, we run one 'step'
     // which includes the internal ReAct loop (Think -> Tool -> Output -> Answer).
-    let response_event = agent.step(history, &mut runtime).await?;
+    let response_event = agent.step(&history, &mut runtime).await?;
 
     if let Event::Message(m) = response_event {
         println!("\nAgent Final Response:\n{}", m.content);

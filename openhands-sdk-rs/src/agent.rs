@@ -1,7 +1,8 @@
 use crate::events::{Event, MessageEvent};
 use crate::llm::LLM;
+use crate::prompts::SYSTEM_PROMPT;
 use crate::runtime::Runtime;
-use genai::chat::ChatMessage;
+use genai::chat::{ChatMessage, ChatRole, ContentPart, ToolCall, ToolResponse};
 
 pub struct Agent {
     llm: LLM,
@@ -10,34 +11,54 @@ pub struct Agent {
 
 impl Agent {
     pub fn new(llm: LLM, system_message: String) -> Self {
+        let combined_system = format!("{}\n\n{}", SYSTEM_PROMPT, system_message);
         Self {
             llm,
-            system_message,
+            system_message: combined_system,
         }
     }
 
     pub async fn step(
         &self,
-        history: Vec<Event>,
+        history: &[Event],
         runtime: &mut dyn Runtime,
     ) -> Result<Event, Box<dyn std::error::Error + Send + Sync>> {
-        // dynamic conversion of events to ChatMessage
         let mut messages = vec![ChatMessage::system(self.system_message.clone())];
 
         for event in history {
             match event {
                 Event::Message(m) => {
                     if m.source == "user" {
-                        messages.push(ChatMessage::user(m.content));
+                        messages.push(ChatMessage::user(m.content.clone()));
                     } else {
-                        messages.push(ChatMessage::assistant(m.content));
+                        messages.push(ChatMessage::assistant(m.content.clone()));
                     }
                 }
-                _ => {} // Ignore others for basic chat
+                Event::Action(a) => {
+                    let mut parts = vec![];
+                    if let Some(thought) = &a.thought {
+                        parts.push(ContentPart::Text(thought.clone()));
+                    }
+                    parts.push(ContentPart::ToolCall(ToolCall {
+                        call_id: a.tool_call_id.clone(),
+                        fn_name: a.tool_name.clone(),
+                        fn_arguments: a.arguments.clone(),
+                    }));
+                    messages.push(ChatMessage {
+                        role: ChatRole::Assistant,
+                        content: parts.into(),
+                        options: None,
+                    });
+                }
+                Event::Observation(o) => {
+                    messages.push(ChatMessage::from(ToolResponse::new(
+                        o.tool_call_id.clone(),
+                        o.content.clone(),
+                    )));
+                }
             }
         }
 
-        // Convert Runtime Tools to genai Tools
         let genai_tools: Vec<genai::chat::Tool> = runtime
             .tools()
             .iter()
@@ -64,43 +85,46 @@ impl Agent {
                 .completion(current_messages.clone(), tools_arg.clone())
                 .await?;
 
-            // If tool calls are present, execute them
             if !response.tool_calls.is_empty() {
-                let tool_call = &response.tool_calls[0]; // Handle first one for now
+                let mut assistant_parts = vec![];
+                if !response.content.is_empty() {
+                    assistant_parts.push(ContentPart::Text(response.content.clone()));
+                }
 
-                let assistant_msg = if !response.content.is_empty() {
-                    ChatMessage::assistant(response.content.clone())
-                } else {
-                    ChatMessage::assistant("Calling tool...".to_string())
-                };
-                current_messages.push(assistant_msg);
+                for tool_call in &response.tool_calls {
+                    assistant_parts.push(ContentPart::ToolCall(tool_call.clone()));
+                }
 
-                let fn_name = &tool_call.fn_name;
-                let fn_args = tool_call.fn_arguments.clone();
-                let fn_args_str = fn_args.to_string(); // For logging
+                current_messages.push(ChatMessage {
+                    role: ChatRole::Assistant,
+                    content: assistant_parts.into(),
+                    options: None,
+                });
 
-                println!(
-                    "Agent executing tool: {} with args: {}",
-                    fn_name, fn_args_str
-                );
+                for tool_call in &response.tool_calls {
+                    let fn_name = &tool_call.fn_name;
+                    let fn_args = tool_call.fn_arguments.clone();
 
-                // Delegate execution to Runtime
-                // fn_args is already an serde_json::Value here (cloned from tool_call.fn_arguments)
-                let result = runtime.execute(fn_name, fn_args).await;
+                    println!(
+                        "Agent executing tool: {} with args: {}",
+                        fn_name,
+                        fn_args.to_string()
+                    );
 
-                let output_content = match result {
-                    Ok(s) => s,
-                    Err(e) => format!("Error: {}", e),
-                };
+                    let result = runtime.execute(fn_name, fn_args).await;
+                    let output_content = match result {
+                        Ok(s) => s,
+                        Err(e) => format!("Error: {}", e),
+                    };
 
-                println!("Agent tool output: {}", output_content);
+                    println!("Agent tool output: {}", output_content);
 
-                current_messages.push(ChatMessage::user(format!(
-                    "Tool '{}' Output: {}",
-                    fn_name, output_content
-                )));
+                    current_messages.push(ChatMessage::from(ToolResponse::new(
+                        tool_call.call_id.clone(),
+                        output_content,
+                    )));
+                }
             } else {
-                // No tool calls, just text response -> Done
                 return Ok(Event::Message(MessageEvent {
                     source: "agent".to_string(),
                     content: response.content,
@@ -144,7 +168,7 @@ mod tests {
         })];
 
         let event = agent
-            .step(history, &mut runtime)
+            .step(&history, &mut runtime)
             .await
             .expect("Step failed");
 
@@ -188,7 +212,7 @@ mod tests {
         })];
 
         let event = agent
-            .step(history, &mut runtime)
+            .step(&history, &mut runtime)
             .await
             .expect("Step failed");
 

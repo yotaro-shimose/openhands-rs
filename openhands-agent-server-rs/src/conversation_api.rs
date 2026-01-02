@@ -182,7 +182,7 @@ pub async fn submit_message(
             // Async lock on runtime, held across await -> OK with Tokio RwLock
             let mut runtime = runtime_lock.write().await;
             agent
-                .step(history_snapshot, runtime.as_mut())
+                .step(&history_snapshot, runtime.as_mut())
                 .await
                 .map_err(|e| e.to_string())?
         };

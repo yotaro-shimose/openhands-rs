@@ -17,11 +17,16 @@ pub struct MessageEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionEvent {
     pub source: String,
-    pub action: String, // Simplified
+    pub tool_name: String,
+    pub tool_call_id: String,
+    pub arguments: serde_json::Value,
+    pub thought: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObservationEvent {
     pub source: String,
+    pub tool_name: String,
+    pub tool_call_id: String,
     pub content: String,
 }

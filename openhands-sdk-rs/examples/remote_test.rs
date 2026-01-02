@@ -41,8 +41,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         ],
     );
 
-    // 4. User Task
-    let user_task = "Write a file named 'remote_test.txt' with content 'RemoteRuntime works!', then read it back.";
+    // 4. User Task - A multi-step task to verify ReAct loop and tool usage
+    let user_task = "Create a directory named 'alignment_test', then write a file 'status.txt' inside it with the text 'aligned', and finally read that file.";
     println!("\nUser Task: {}", user_task);
 
     // 5. Run Agent Step
@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     })];
 
     println!("\n--- Running Agent ---");
-    let event = agent.step(history, &mut runtime).await?;
+    let event = agent.step(&history, &mut runtime).await?;
     println!("Agent response: {:?}", event);
 
     if let Event::Message(m) = event {
