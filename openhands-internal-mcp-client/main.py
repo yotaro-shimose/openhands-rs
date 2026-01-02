@@ -31,9 +31,11 @@ async def main() -> None:
             1. Create a directory named 'test_dir' using bash.
             2. Inside 'test_dir', create a file named 'hello.txt' with content 'Hello from OpenHands!'.
             3. Use the 'list_files' tool to verify the contents of 'test_dir'.
-            4. Read the file back using 'read_file' to confirm content.
-            5. Delete 'hello.txt' using the 'delete_file' tool.
-            6. Use 'list_files' again to confirm it's gone.
+            4. Read 'test_dir/hello.txt' using 'read_file' to confirm content.
+            5. Use the 'file_editor' tool with command 'str_replace' to change 'OpenHands' to 'Rust' in 'test_dir/hello.txt'.
+            6. Read 'test_dir/hello.txt' again to verify the change.
+            7. Delete 'test_dir/hello.txt' using the 'delete_file' tool.
+            8. Use 'list_files' on 'test_dir' again to confirm it's gone.
             """,
             mcp_servers=[server],
             model_settings=ModelSettings(tool_choice="auto"),

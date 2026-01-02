@@ -57,11 +57,6 @@ pub struct DeleteFileArgs {
     pub path: String,
 }
 
-#[derive(Deserialize, schemars::JsonSchema)]
-pub struct ApplyPatchArgs {
-    pub patch: String,
-}
-
 #[tool_router]
 impl OpenHandsService {
     pub fn new(bash: BashEventService, file: FileService) -> Self {
@@ -276,71 +271,6 @@ impl OpenHandsService {
             Err(e) => Err(McpError {
                 code: ErrorCode(0),
                 message: e.to_string().into(),
-                data: None,
-            }),
-        }
-    }
-
-    #[tool(
-        name = "apply_patch",
-        description = "Apply a patch to files in the workspace. Supports custom GPT-5.1 patch format."
-    )]
-    async fn apply_patch(
-        &self,
-        Parameters(args): Parameters<ApplyPatchArgs>,
-    ) -> Result<CallToolResult, McpError> {
-        let paths = crate::patch::identify_files_needed(&args.patch);
-        let mut orig_files = HashMap::new();
-
-        for p in paths {
-            let path_buf = self.file.workspace_dir.join(&p);
-            if path_buf.exists() {
-                let content = fs::read_to_string(&path_buf).map_err(|e| McpError {
-                    code: ErrorCode(-32603),
-                    message: format!("Failed to read {}: {}", p, e).into(),
-                    data: None,
-                })?;
-                orig_files.insert(p, content);
-            }
-        }
-
-        match crate::patch::process_patch(&args.patch, orig_files) {
-            Ok((msg, _fuzz, results)) => {
-                for (path, content_opt) in results {
-                    let full_path = self.file.workspace_dir.join(&path);
-                    if let Some(content) = content_opt {
-                        if let Some(parent) = full_path.parent() {
-                            fs::create_dir_all(parent).map_err(|e| McpError {
-                                code: ErrorCode(-32603),
-                                message: format!(
-                                    "Failed to create directory {}: {}",
-                                    parent.display(),
-                                    e
-                                )
-                                .into(),
-                                data: None,
-                            })?;
-                        }
-                        fs::write(&full_path, &content).map_err(|e| McpError {
-                            code: ErrorCode(-32603),
-                            message: format!("Failed to write {}: {}", path, e).into(),
-                            data: None,
-                        })?;
-                    } else {
-                        if full_path.exists() {
-                            fs::remove_file(&full_path).map_err(|e| McpError {
-                                code: ErrorCode(-32603),
-                                message: format!("Failed to delete {}: {}", path, e).into(),
-                                data: None,
-                            })?;
-                        }
-                    }
-                }
-                Ok(CallToolResult::success(vec![Content::text(msg)]))
-            }
-            Err(e) => Err(McpError {
-                code: ErrorCode(-32603),
-                message: format!("Patch failed: {}", e).into(),
                 data: None,
             }),
         }

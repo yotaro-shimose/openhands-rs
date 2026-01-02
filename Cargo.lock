@@ -1164,7 +1164,6 @@ name = "openhands-agent-server-rs"
 version = "0.1.0"
 dependencies = [
  "axum",
- "chrono",
  "dotenv",
  "glob",
  "openhands-sdk-rs",
@@ -1172,12 +1171,10 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
- "similar",
  "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "uuid",
  "walkdir",
 ]
 
