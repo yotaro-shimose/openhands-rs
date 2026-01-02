@@ -1,3 +1,10 @@
 /target
 .env
 software-agent-sdk
+/bash_events
+/workspace
+/alignment_test
+*.log
+**/bash_events
+**/workspace
+**/alignment_test
