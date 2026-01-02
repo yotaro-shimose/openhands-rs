@@ -8,6 +8,7 @@ use rmcp::{
     service::RequestContext,
     tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler,
 };
+use std::fs;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
@@ -21,6 +22,8 @@ pub struct OpenHandsService {
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 pub struct ExecuteBashArgs {
     pub command: String,
+    pub cwd: Option<String>,
+    pub timeout: Option<u64>,
 }
 
 #[derive(serde::Deserialize, schemars::JsonSchema)]
@@ -32,6 +35,16 @@ pub struct ReadFileArgs {
 pub struct WriteFileArgs {
     pub path: String,
     pub content: String,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct ListFilesArgs {
+    pub path: String,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct DeleteFileArgs {
+    pub path: String,
 }
 
 #[tool_router]
@@ -51,8 +64,8 @@ impl OpenHandsService {
     ) -> Result<CallToolResult, McpError> {
         let req = ExecuteBashRequest {
             command: args.command,
-            cwd: None,
-            timeout: None,
+            cwd: args.cwd,
+            timeout: args.timeout,
         };
 
         let cmd = self.bash.start_bash_command(req);
@@ -141,6 +154,54 @@ impl OpenHandsService {
                     .into(),
                 data: None,
             })
+        }
+    }
+
+    #[tool(
+        name = "list_files",
+        description = "List files in a directory in the workspace"
+    )]
+    async fn list_files(
+        &self,
+        Parameters(args): Parameters<ListFilesArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let path = self.file.workspace_dir.join(&args.path);
+        match fs::read_dir(path) {
+            Ok(entries) => {
+                let mut files = Vec::new();
+                for entry in entries.filter_map(Result::ok) {
+                    if let Some(name) = entry.file_name().to_str() {
+                        let type_str = if entry.path().is_dir() { "dir" } else { "file" };
+                        files.push(format!("{} ({})", name, type_str));
+                    }
+                }
+                Ok(CallToolResult::success(vec![Content::text(
+                    files.join("\n"),
+                )]))
+            }
+            Err(e) => Err(McpError {
+                code: ErrorCode(0),
+                message: e.to_string().into(),
+                data: None,
+            }),
+        }
+    }
+
+    #[tool(name = "delete_file", description = "Delete a file from the workspace")]
+    async fn delete_file(
+        &self,
+        Parameters(args): Parameters<DeleteFileArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let path = self.file.workspace_dir.join(&args.path);
+        match fs::remove_file(path) {
+            Ok(_) => Ok(CallToolResult::success(vec![Content::text(
+                "File deleted successfully",
+            )])),
+            Err(e) => Err(McpError {
+                code: ErrorCode(0),
+                message: e.to_string().into(),
+                data: None,
+            }),
         }
     }
 }
