@@ -1158,10 +1158,13 @@ dependencies = [
  "glob",
  "lazy_static",
  "rand",
+ "regex",
  "reqwest 0.13.1",
  "serde",
  "serde_json",
+ "similar",
  "sysinfo",
+ "tempfile",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
@@ -1396,6 +1399,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "regex"
+version = "1.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "843bc0191f75f3e22651ae5f1e72939ab2f72a4bc30fa80a066bd66edefc24d4"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-automata",
+ "regex-syntax",
 ]
 
 [[package]]
@@ -1840,6 +1855,12 @@ dependencies = [
  "errno",
  "libc",
 ]
+
+[[package]]
+name = "similar"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
 name = "slab"

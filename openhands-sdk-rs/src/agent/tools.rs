@@ -1,3 +1,13 @@
+mod apply_patch;
+mod file_editor;
+mod glob;
+mod grep;
+
+pub use apply_patch::ApplyPatchTool;
+pub use file_editor::FileEditorTool;
+pub use glob::GlobTool;
+pub use grep::GrepTool;
+
 use async_trait::async_trait;
 use serde_json::Value;
 use std::process::Command;
