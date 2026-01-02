@@ -8,14 +8,24 @@ use rmcp::{
     service::RequestContext,
     tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler,
 };
+use serde::Deserialize;
+use std::collections::HashMap;
 use std::fs;
+use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
+
+use crate::tools::file_editor::{run_file_editor, FileEditorArgs};
+use crate::tools::glob::{run_glob, GlobArgs};
+use crate::tools::grep::{run_grep, GrepArgs};
+use crate::tools::task_tracker::{run_task_tracker, TaskTrackerArgs};
 
 #[derive(Clone)]
 pub struct OpenHandsService {
     bash: Arc<BashEventService>,
     file: Arc<FileService>,
+    editor_history: Arc<Mutex<HashMap<PathBuf, Vec<String>>>>,
     tool_router: ToolRouter<OpenHandsService>,
 }
 
@@ -37,14 +47,19 @@ pub struct WriteFileArgs {
     pub content: String,
 }
 
-#[derive(serde::Deserialize, schemars::JsonSchema)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct ListFilesArgs {
     pub path: String,
 }
 
-#[derive(serde::Deserialize, schemars::JsonSchema)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct DeleteFileArgs {
     pub path: String,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct ApplyPatchArgs {
+    pub patch: String,
 }
 
 #[tool_router]
@@ -53,8 +68,69 @@ impl OpenHandsService {
         Self {
             bash: Arc::new(bash),
             file: Arc::new(file),
+            editor_history: Arc::new(Mutex::new(HashMap::new())),
             tool_router: Self::tool_router(),
         }
+    }
+
+    #[tool(
+        name = "glob",
+        description = "Fast file pattern matching tool. Finds files by name patterns (e.g. '**/*.js'). Returns matching file paths."
+    )]
+    async fn glob_files(
+        &self,
+        Parameters(args): Parameters<GlobArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let output = run_glob(&args, &self.file.workspace_dir)?;
+        Ok(CallToolResult::success(vec![Content::text(output)]))
+    }
+
+    #[tool(
+        name = "grep",
+        description = "Fast content search tool. Searches file contents using regex. Returns matching file paths."
+    )]
+    async fn grep_files(
+        &self,
+        Parameters(args): Parameters<GrepArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let output = run_grep(&args, &self.file.workspace_dir)?;
+        Ok(CallToolResult::success(vec![Content::text(output)]))
+    }
+
+    #[tool(
+        name = "task_tracker",
+        description = "Track and manage tasks. Command 'view' shows current tasks. 'plan' updates tasks."
+    )]
+    async fn task_tracker(
+        &self,
+        Parameters(args): Parameters<TaskTrackerArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let output = run_task_tracker(&args, &self.file.workspace_dir)?;
+        Ok(CallToolResult::success(vec![Content::text(output)]))
+    }
+
+    #[tool(
+        name = "file_editor",
+        description = "Edit files. Commands: view, create, str_replace, insert, undo_edit."
+    )]
+    async fn file_editor(
+        &self,
+        Parameters(args): Parameters<FileEditorArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let output = run_file_editor(&args, &self.file.workspace_dir, &self.editor_history).await?;
+        Ok(CallToolResult::success(vec![Content::text(output)]))
+    }
+
+    #[tool(
+        name = "terminal",
+        description = "Execute shell commands. Wraps execute_bash."
+    )]
+    async fn terminal(
+        &self,
+        Parameters(args): Parameters<ExecuteBashArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        // Reuse execute_bash logic
+        self.execute_bash(Parameters(args)).await
     }
 
     #[tool(name = "execute_bash", description = "Execute a bash command")]
@@ -200,6 +276,71 @@ impl OpenHandsService {
             Err(e) => Err(McpError {
                 code: ErrorCode(0),
                 message: e.to_string().into(),
+                data: None,
+            }),
+        }
+    }
+
+    #[tool(
+        name = "apply_patch",
+        description = "Apply a patch to files in the workspace. Supports custom GPT-5.1 patch format."
+    )]
+    async fn apply_patch(
+        &self,
+        Parameters(args): Parameters<ApplyPatchArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let paths = crate::patch::identify_files_needed(&args.patch);
+        let mut orig_files = HashMap::new();
+
+        for p in paths {
+            let path_buf = self.file.workspace_dir.join(&p);
+            if path_buf.exists() {
+                let content = fs::read_to_string(&path_buf).map_err(|e| McpError {
+                    code: ErrorCode(-32603),
+                    message: format!("Failed to read {}: {}", p, e).into(),
+                    data: None,
+                })?;
+                orig_files.insert(p, content);
+            }
+        }
+
+        match crate::patch::process_patch(&args.patch, orig_files) {
+            Ok((msg, _fuzz, results)) => {
+                for (path, content_opt) in results {
+                    let full_path = self.file.workspace_dir.join(&path);
+                    if let Some(content) = content_opt {
+                        if let Some(parent) = full_path.parent() {
+                            fs::create_dir_all(parent).map_err(|e| McpError {
+                                code: ErrorCode(-32603),
+                                message: format!(
+                                    "Failed to create directory {}: {}",
+                                    parent.display(),
+                                    e
+                                )
+                                .into(),
+                                data: None,
+                            })?;
+                        }
+                        fs::write(&full_path, &content).map_err(|e| McpError {
+                            code: ErrorCode(-32603),
+                            message: format!("Failed to write {}: {}", path, e).into(),
+                            data: None,
+                        })?;
+                    } else {
+                        if full_path.exists() {
+                            fs::remove_file(&full_path).map_err(|e| McpError {
+                                code: ErrorCode(-32603),
+                                message: format!("Failed to delete {}: {}", path, e).into(),
+                                data: None,
+                            })?;
+                        }
+                    }
+                }
+                Ok(CallToolResult::success(vec![Content::text(msg)]))
+            }
+            Err(e) => Err(McpError {
+                code: ErrorCode(-32603),
+                message: format!("Patch failed: {}", e).into(),
                 data: None,
             }),
         }

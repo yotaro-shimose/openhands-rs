@@ -1166,15 +1166,19 @@ dependencies = [
  "axum",
  "chrono",
  "dotenv",
+ "glob",
  "openhands-sdk-rs",
+ "regex",
  "rmcp",
  "serde",
  "serde_json",
+ "similar",
  "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]

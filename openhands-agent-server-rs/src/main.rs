@@ -1,4 +1,6 @@
+mod patch;
 mod service;
+mod tools;
 
 use axum::Router;
 use openhands_sdk_rs::runtime::bash::BashEventService;
