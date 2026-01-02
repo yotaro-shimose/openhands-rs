@@ -1,0 +1,8 @@
+target/
+.venv/
+.git/
+node_modules/
+*.log
+workspace/
+test_dir/
+openhands-internal-mcp-client/

@@ -37,7 +37,9 @@ async fn main() {
         );
 
     // Build our application with a route
-    let app = Router::new().nest_service("/mcp", mcp_service);
+    let app = Router::new()
+        .route("/health", axum::routing::get(|| async { "OK" }))
+        .nest_service("/mcp", mcp_service);
 
     // Run it
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
