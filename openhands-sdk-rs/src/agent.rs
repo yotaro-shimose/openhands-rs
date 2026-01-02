@@ -3,6 +3,8 @@ use crate::llm::LLM;
 use crate::prompts::SYSTEM_PROMPT;
 use crate::runtime::Runtime;
 use genai::chat::{ChatMessage, ChatRole, ContentPart, ToolCall, ToolResponse};
+use owo_colors::OwoColorize;
+use tracing::{error, info};
 
 pub struct Agent {
     llm: LLM,
@@ -105,19 +107,27 @@ impl Agent {
                     let fn_name = &tool_call.fn_name;
                     let fn_args = tool_call.fn_arguments.clone();
 
-                    println!(
+                    info!(
                         "Agent executing tool: {} with args: {}",
-                        fn_name,
-                        fn_args.to_string()
+                        fn_name.bright_cyan(),
+                        fn_args.to_string().dimmed()
                     );
 
                     let result = runtime.execute(fn_name, fn_args).await;
                     let output_content = match result {
                         Ok(s) => s,
-                        Err(e) => format!("Error: {}", e),
+                        Err(e) => {
+                            let err_msg = format!("Error: {}", e);
+                            error!("{}", err_msg.red());
+                            err_msg
+                        }
                     };
 
-                    println!("Agent tool output: {}", output_content);
+                    info!(
+                        "Agent tool output ({}): {}",
+                        fn_name.bright_cyan(),
+                        output_content.dimmed()
+                    );
 
                     current_messages.push(ChatMessage::from(ToolResponse::new(
                         tool_call.call_id.clone(),

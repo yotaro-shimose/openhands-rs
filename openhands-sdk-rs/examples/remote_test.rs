@@ -9,6 +9,7 @@ use openhands_sdk_rs::{
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     dotenv::dotenv().ok();
+    openhands_sdk_rs::logger::init_logging();
     println!("Testing RemoteRuntime against local server...");
 
     let api_key = std::env::var("OPENAI_API_KEY").ok();

@@ -21,11 +21,8 @@ use tokio::net::TcpListener;
 async fn main() {
     dotenv::dotenv().ok();
 
-    // Set up tracing
-    if env::var("RUST_LOG").is_err() {
-        env::set_var("RUST_LOG", "info");
-    }
-    tracing_subscriber::fmt::init();
+    // Set up tracing using the SDK's logger
+    openhands_sdk_rs::logger::init_logging();
 
     let cwd = env::current_dir().unwrap();
     let bash_events_dir = cwd.join("bash_events");
