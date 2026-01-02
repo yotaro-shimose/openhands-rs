@@ -1,16 +1,14 @@
-pub mod conversation_api;
-mod handlers;
+mod service;
 
-use crate::handlers::AppState;
-use axum::{
-    routing::{get, post},
-    Router,
-};
-use conversation_api::{init_conversation, submit_message};
+use axum::Router;
 use openhands_sdk_rs::runtime::bash::BashEventService;
 use openhands_sdk_rs::runtime::file::FileService;
+use rmcp::transport::{
+    streamable_http_server::{session::local::LocalSessionManager, tower::StreamableHttpService},
+    StreamableHttpServerConfig,
+};
+use service::OpenHandsService;
 use std::env;
-use std::sync::Arc;
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -25,33 +23,20 @@ async fn main() {
 
     let bash_service = BashEventService::new(bash_events_dir);
     let file_service = FileService::new(cwd.join("workspace"));
-    let state = Arc::new(AppState::new(bash_service, file_service));
+
+    // Create the MCP service
+    let openhands_service = OpenHandsService::new(bash_service, file_service);
+
+    // Wrap it in StreamableHttpService
+    let mcp_service: StreamableHttpService<OpenHandsService, LocalSessionManager> =
+        StreamableHttpService::new(
+            move || Ok(openhands_service.clone()),
+            LocalSessionManager::default().into(),
+            StreamableHttpServerConfig::default(),
+        );
 
     // Build our application with a route
-    let app = Router::new()
-        .route("/health", get(handlers::health))
-        .route("/alive", get(handlers::alive))
-        .route("/server_info", get(handlers::server_info))
-        .route(
-            "/bash/start_bash_command",
-            post(handlers::start_bash_command),
-        )
-        .route(
-            "/bash/execute_bash_command",
-            post(handlers::execute_bash_command),
-        )
-        .route(
-            "/bash/bash_events/search",
-            get(handlers::search_bash_events),
-        )
-        .route("/bash/bash_events/:id", get(handlers::get_bash_event))
-        // File Routes
-        .route("/file/read", post(handlers::read_file))
-        .route("/file/write", post(handlers::write_file))
-        // Conversation Routes
-        .route("/api/conversations", post(init_conversation))
-        .route("/api/conversations/:id/message", post(submit_message))
-        .with_state(state);
+    let app = Router::new().nest_service("/mcp", mcp_service);
 
     // Run it
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
