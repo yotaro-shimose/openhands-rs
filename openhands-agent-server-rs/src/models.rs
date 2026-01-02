@@ -10,6 +10,25 @@ pub struct ExecuteBashRequest {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FileReadRequest {
+    pub path: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FileWriteRequest {
+    pub path: String,
+    pub content: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FileResponse {
+    pub path: String,
+    pub content: Option<String>,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "kind")]
 pub enum BashEvent {
     BashCommand(BashCommand),

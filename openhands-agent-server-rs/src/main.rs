@@ -1,10 +1,12 @@
 mod bash_service;
 pub mod conversation_api;
+mod file_service;
 mod handlers;
 mod models;
 mod system;
 
 use crate::bash_service::BashEventService;
+use crate::file_service::FileService;
 use crate::handlers::AppState;
 use axum::{
     routing::{get, post},
@@ -29,7 +31,8 @@ async fn main() {
     let bash_events_dir = cwd.join("bash_events");
 
     let bash_service = BashEventService::new(bash_events_dir);
-    let state = Arc::new(AppState::new(bash_service));
+    let file_service = FileService::new(cwd.join("workspace"));
+    let state = Arc::new(AppState::new(bash_service, file_service));
 
     // Build our application with a route
     let app = Router::new()
@@ -49,6 +52,9 @@ async fn main() {
             get(handlers::search_bash_events),
         )
         .route("/bash/bash_events/:id", get(handlers::get_bash_event))
+        // File Routes
+        .route("/file/read", post(handlers::read_file))
+        .route("/file/write", post(handlers::write_file))
         // Conversation Routes
         .route("/api/conversations", post(init_conversation))
         .route("/api/conversations/:id/message", post(submit_message))

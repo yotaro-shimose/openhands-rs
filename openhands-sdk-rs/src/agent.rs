@@ -93,6 +93,8 @@ impl Agent {
                     Err(e) => format!("Error: {}", e),
                 };
 
+                println!("Agent tool output: {}", output_content);
+
                 current_messages.push(ChatMessage::user(format!(
                     "Tool '{}' Output: {}",
                     fn_name, output_content
@@ -114,15 +116,11 @@ impl Agent {
 mod tests {
     use super::*;
     use crate::llm::LLMConfig;
-    use crate::runtime::LocalRuntime;
-    use crate::tools::{CmdTool, Tool};
 
     #[tokio::test]
     async fn test_agent_step() {
         dotenv::dotenv().ok();
         let api_key = std::env::var("OPENAI_API_KEY").ok();
-        let tools: Vec<Box<dyn Tool>> = vec![Box::new(crate::tools::CmdTool)];
-        let mut runtime = crate::runtime::LocalRuntime::new(tools);
         if api_key.is_none() {
             println!("Skipping test_agent_step because OPENAI_API_KEY is not set");
             return;
@@ -137,8 +135,8 @@ mod tests {
         let agent = Agent::new(llm, "You are a helpful assistant.".to_string());
 
         // Runtime
-        use crate::runtime::DefaultRuntime;
-        let mut runtime = DefaultRuntime::new(vec![]);
+        use crate::runtime::LocalRuntime;
+        let mut runtime = LocalRuntime::new(vec![]);
 
         let history = vec![Event::Message(MessageEvent {
             source: "user".to_string(),
@@ -180,8 +178,8 @@ mod tests {
         );
 
         // Runtime with CmdTool
-        use crate::runtime::DefaultRuntime;
-        let mut runtime = DefaultRuntime::new(vec![Box::new(CmdTool)]);
+        use crate::runtime::LocalRuntime;
+        let mut runtime = LocalRuntime::new(vec![Box::new(CmdTool)]);
 
         // Request that requires tool execution
         let history = vec![Event::Message(MessageEvent {

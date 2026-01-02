@@ -19,9 +19,8 @@ pub struct DockerRuntime {
     /// The Docker container ID (name) used for lifecycle management (stop/rm).
     pub container_id: String,
     pub image_name: String,
-    pub tools: Vec<Box<dyn Tool>>,
-    /// The base URL of the agent server running inside the container (e.g., http://localhost:32768).
-    pub base_url: String, // http://localhost:PORT
+    /// The internal RemoteRuntime used for communication with the agent server.
+    remote: crate::runtime::RemoteRuntime,
 }
 
 impl DockerRuntime {
@@ -64,8 +63,7 @@ impl DockerRuntime {
         Self {
             container_id: container_name,
             image_name: image.to_string(),
-            tools,
-            base_url: format!("http://localhost:{}", port),
+            remote: crate::runtime::RemoteRuntime::new(format!("http://localhost:{}", port), tools),
         }
     }
 
@@ -90,40 +88,11 @@ impl Drop for DockerRuntime {
 #[async_trait]
 impl Runtime for DockerRuntime {
     fn tools(&self) -> &[Box<dyn Tool>] {
-        &self.tools
+        self.remote.tools()
     }
 
-    /// Executes an action by sending an HTTP request to the agent server running inside the container.
-    ///
-    /// Currently supports:
-    /// - `cmd`: Proxies to `/api/bash/execute_bash_command`.
-    ///
-    /// Future support needed for:
-    /// - `file_read` / `file_write`: Will need FS API endpoints on the server.
+    /// Executes an action by delegating to the internal RemoteRuntime.
     async fn execute(&self, action: &str, args: Value) -> Result<String, String> {
-        // Delegate to the internal agent server via HTTP
-        let client = reqwest::Client::new();
-
-        // This mapping depends on how the internal server exposes tools.
-        // Assuming it exposes /api/bash/execute for CmdTool
-        if action == "cmd" {
-            let command = args["command"].as_str().ok_or("Missing command")?;
-            let res = client
-                .post(format!("{}/api/bash/execute_bash_command", self.base_url))
-                .json(&serde_json::json!({ "command": command }))
-                .send()
-                .await
-                .map_err(|e| e.to_string())?;
-
-            let text = res.text().await.map_err(|e| e.to_string())?;
-            return Ok(text);
-        }
-
-        // For file tools, we might need new endpoints or use bash fallback
-        // MVP: Fallback to bash for file ops
-        Err(format!(
-            "Tool {} not yet supported via DockerRuntime API",
-            action
-        ))
+        self.remote.execute(action, args).await
     }
 }

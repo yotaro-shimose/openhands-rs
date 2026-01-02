@@ -1,6 +1,7 @@
 use crate::bash_service::BashEventService;
 use crate::conversation_api::ConversationManager;
-use crate::models::{BashEvent, BashOutput, ExecuteBashRequest};
+use crate::file_service::FileService;
+use crate::models::{BashEvent, BashOutput, ExecuteBashRequest, FileReadRequest, FileWriteRequest};
 use crate::system;
 use axum::{
     extract::{Path, Query, State},
@@ -14,13 +15,15 @@ use uuid::Uuid;
 
 pub struct AppState {
     pub bash_service: Arc<BashEventService>,
+    pub file_service: Arc<FileService>,
     pub conversation_manager: Arc<RwLock<ConversationManager>>,
 }
 
 impl AppState {
-    pub fn new(bash_service: BashEventService) -> Self {
+    pub fn new(bash_service: BashEventService, file_service: FileService) -> Self {
         Self {
             bash_service: Arc::new(bash_service),
+            file_service: Arc::new(file_service),
             conversation_manager: Arc::new(RwLock::new(ConversationManager::new())),
         }
     }
@@ -114,4 +117,18 @@ pub async fn get_bash_event(
         Some(event) => Json(event).into_response(),
         None => (StatusCode::NOT_FOUND, "Event not found").into_response(),
     }
+}
+
+pub async fn read_file(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<FileReadRequest>,
+) -> impl IntoResponse {
+    Json(state.file_service.read_file(req))
+}
+
+pub async fn write_file(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<FileWriteRequest>,
+) -> impl IntoResponse {
+    Json(state.file_service.write_file(req))
 }

@@ -2,8 +2,8 @@ use openhands_sdk_rs::{
     agent::Agent,
     events::{Event, MessageEvent},
     llm::{LLM, LLMConfig},
-    runtime::LocalRuntime,
-    tools::{CmdTool, FileReadTool, FileWriteTool, Tool},
+    runtime::DockerRuntime,
+    tools::{CmdTool, FileReadTool, FileWriteTool},
 };
 
 #[tokio::main]
@@ -33,13 +33,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .to_string(),
     );
 
-    // 3. Initialize Runtime (LocalRuntime)
+    // 3. Initialize Runtime (DockerRuntime)
     //    We separate execution from decision making. The runtime holds the tools.
-    let mut runtime = LocalRuntime::new(vec![
-        Box::new(CmdTool),
-        Box::new(FileReadTool),
-        Box::new(FileWriteTool),
-    ]);
+    let mut runtime = DockerRuntime::new(
+        "openhands-agent-server-rs:latest",
+        vec![
+            Box::new(CmdTool),
+            Box::new(FileReadTool),
+            Box::new(FileWriteTool),
+        ],
+    );
 
     // 4. Define the Task
     let task = "Write a Python script named 'hello.py' that prints 'Hello from Rust Agent!', then execute it.";
