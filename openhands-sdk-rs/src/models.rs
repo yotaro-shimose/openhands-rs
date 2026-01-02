@@ -36,7 +36,6 @@ pub enum BashEvent {
 }
 
 impl BashEvent {
-    #[allow(dead_code)]
     pub fn id(&self) -> Uuid {
         match self {
             BashEvent::BashCommand(c) => c.id,
@@ -76,4 +75,25 @@ pub struct BashOutput {
 pub struct BashEventPage {
     pub items: Vec<BashEvent>,
     pub next_page_id: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct InitConversationRequest {
+    pub system_message: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ConversationResponse {
+    pub id: String,
+    pub status: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MessageRequest {
+    pub content: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MessageResponse {
+    pub response: String,
 }

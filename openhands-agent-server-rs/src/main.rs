@@ -1,18 +1,14 @@
-mod bash_service;
 pub mod conversation_api;
-mod file_service;
 mod handlers;
-mod models;
-mod system;
 
-use crate::bash_service::BashEventService;
-use crate::file_service::FileService;
 use crate::handlers::AppState;
 use axum::{
     routing::{get, post},
     Router,
 };
 use conversation_api::{init_conversation, submit_message};
+use openhands_sdk_rs::services::bash::BashEventService;
+use openhands_sdk_rs::services::file::FileService;
 use std::env;
 use std::sync::Arc;
 use tokio::net::TcpListener;

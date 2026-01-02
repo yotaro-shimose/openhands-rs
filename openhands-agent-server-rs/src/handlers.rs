@@ -1,13 +1,15 @@
-use crate::bash_service::BashEventService;
 use crate::conversation_api::ConversationManager;
-use crate::file_service::FileService;
-use crate::models::{BashEvent, BashOutput, ExecuteBashRequest, FileReadRequest, FileWriteRequest};
-use crate::system;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Json},
 };
+use openhands_sdk_rs::models::{
+    BashEvent, BashOutput, ExecuteBashRequest, FileReadRequest, FileWriteRequest,
+};
+use openhands_sdk_rs::services::bash::BashEventService;
+use openhands_sdk_rs::services::file::FileService;
+use openhands_sdk_rs::system;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::{Arc, RwLock};

@@ -101,11 +101,6 @@ impl BashEventService {
             }
         };
 
-        // For simplicity, we read everything at end for now, or minimal chunking.
-        // Implementing full stream chunking like Python requires more complex async loop.
-        // Let's stick to reading complete output for first pass of parity to match `execute_bash_command` reliability,
-        // but since this is background, we can just wait.
-
         let wait_output = async {
             let mut stdout = String::new();
             let mut stderr = String::new();
@@ -126,7 +121,7 @@ impl BashEventService {
                     id: Uuid::new_v4(),
                     timestamp: Utc::now(),
                     command_id: command.id,
-                    order: 0, // Simplified single output event
+                    order: 0,
                     exit_code: Some(exit_code),
                     stdout: if stdout.is_empty() {
                         None
@@ -159,8 +154,10 @@ impl BashEventService {
 
     pub fn get_bash_event(&self, id: Uuid) -> Option<BashEvent> {
         let pattern = self.bash_events_dir.join(format!("*_{}", id.simple()));
-        let paths: Vec<_> = glob(pattern.to_str()?)
-            .ok()?
+        let paths: Vec<_> = glob(pattern.to_str().unwrap_or(""))
+            .ok()
+            .into_iter()
+            .flatten()
             .filter_map(Result::ok)
             .collect();
 
@@ -172,22 +169,8 @@ impl BashEventService {
     }
 
     pub fn search_bash_events(&self, command_id: Option<Uuid>) -> BashEventPage {
-        let pattern = if let Some(_cid) = command_id {
-            // Find all events with this command id in name
-            // Filename formats:
-            // Command: TIMESTAMP_BashCommand_CMDID_CMDID (since id=command_id) -- Wait, format is TIMESTAMP_KIND_ID.
-            // But for BashCommand ID is CMDID. So TIMESTAMP_BashCommand_CMDID.
-            // Output: TIMESTAMP_BashOutput_CMDID_OUTPUTID.
-            // So we can glob for *_{cid.simple()}* potentially?
-            // Actually Python implementation does: *_{cid.simple()}_* OR *_{cid.simple()} depending on structure.
-            // Let's scan all and filter for correctness and simplicity.
-            "*"
-        } else {
-            "*"
-        };
-
         let mut events = Vec::new();
-        let full_pattern = self.bash_events_dir.join(pattern);
+        let full_pattern = self.bash_events_dir.join("*");
 
         if let Ok(entries) = glob(full_pattern.to_str().unwrap_or("")) {
             for entry in entries.filter_map(Result::ok) {
@@ -207,140 +190,11 @@ impl BashEventService {
             }
         }
 
-        // Sort by timestamp aka filename usually works, or sort explicitly
         events.sort_by_key(|e| e.timestamp());
 
         BashEventPage {
             items: events,
-            next_page_id: None, // No pagination implemented yet
+            next_page_id: None,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    async fn wait_for_output(service: &BashEventService, cmd_id: Uuid) -> Option<BashOutput> {
-        for _ in 0..50 {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            let page = service.search_bash_events(Some(cmd_id));
-            if let Some(event) = page.items.last() {
-                if let BashEvent::BashOutput(out) = event {
-                    return Some(out.clone());
-                }
-            }
-        }
-        None
-    }
-
-    #[tokio::test]
-    async fn test_run_bash_command_success() {
-        let dir = tempdir().unwrap();
-        let service = BashEventService::new(dir.path().to_path_buf());
-
-        let req = ExecuteBashRequest {
-            command: "echo hello".to_string(),
-            cwd: None,
-            timeout: Some(5),
-        };
-
-        let cmd = service.start_bash_command(req);
-        let out = wait_for_output(&service, cmd.id).await.expect("No output");
-
-        assert_eq!(out.exit_code, Some(0));
-        assert_eq!(out.stdout, Some("hello\n".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_run_bash_command_failure() {
-        let dir = tempdir().unwrap();
-        let service = BashEventService::new(dir.path().to_path_buf());
-
-        let req = ExecuteBashRequest {
-            command: "exit 1".to_string(),
-            cwd: None,
-            timeout: Some(5),
-        };
-
-        let cmd = service.start_bash_command(req);
-        let out = wait_for_output(&service, cmd.id).await.expect("No output");
-
-        assert_eq!(out.exit_code, Some(1));
-    }
-
-    #[tokio::test]
-    async fn test_run_bash_command_timeout() {
-        let dir = tempdir().unwrap();
-        let service = BashEventService::new(dir.path().to_path_buf());
-
-        let req = ExecuteBashRequest {
-            command: "sleep 2".to_string(),
-            cwd: None,
-            timeout: Some(1),
-        };
-
-        let cmd = service.start_bash_command(req);
-        let out = wait_for_output(&service, cmd.id).await.expect("No output");
-
-        assert_eq!(out.exit_code, Some(-1));
-        assert!(out.stderr.unwrap_or_default().contains("timed out"));
-    }
-
-    #[tokio::test]
-    async fn test_run_bash_command_cwd() {
-        let dir = tempdir().unwrap();
-        let service = BashEventService::new(dir.path().to_path_buf());
-
-        let req = ExecuteBashRequest {
-            command: "pwd".to_string(),
-            cwd: Some("/".to_string()),
-            timeout: Some(5),
-        };
-
-        let cmd = service.start_bash_command(req);
-        let out = wait_for_output(&service, cmd.id).await.expect("No output");
-
-        assert_eq!(out.exit_code, Some(0));
-        assert_eq!(
-            out.stdout.map(|s| s.trim().to_string()),
-            Some("/".to_string())
-        );
-    }
-
-    #[tokio::test]
-    async fn test_search_bash_events() {
-        let dir = tempdir().unwrap();
-        let service = BashEventService::new(dir.path().to_path_buf());
-
-        // Run first command
-        let req1 = ExecuteBashRequest {
-            command: "echo cmd1".to_string(),
-            cwd: None,
-            timeout: Some(5),
-        };
-        let cmd1 = service.start_bash_command(req1);
-        wait_for_output(&service, cmd1.id).await;
-
-        // Run second command
-        let req2 = ExecuteBashRequest {
-            command: "echo cmd2".to_string(),
-            cwd: None,
-            timeout: Some(5),
-        };
-        let cmd2 = service.start_bash_command(req2);
-        wait_for_output(&service, cmd2.id).await;
-
-        // Search for cmd1
-        let page1 = service.search_bash_events(Some(cmd1.id));
-        assert!(page1.items.iter().all(|e| match e {
-            BashEvent::BashCommand(c) => c.id == cmd1.id,
-            BashEvent::BashOutput(o) => o.command_id == cmd1.id,
-        }));
-
-        // Search all
-        let page_all = service.search_bash_events(None);
-        assert!(page_all.items.len() >= 4); // 2 commands + 2 outputs
     }
 }

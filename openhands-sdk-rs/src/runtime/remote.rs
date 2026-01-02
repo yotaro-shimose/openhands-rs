@@ -1,3 +1,6 @@
+use crate::models::{
+    BashOutput, ExecuteBashRequest, FileReadRequest, FileResponse, FileWriteRequest,
+};
 use crate::runtime::Runtime;
 use crate::tools::Tool;
 use async_trait::async_trait;
@@ -15,19 +18,6 @@ impl RemoteRuntime {
     }
 }
 
-#[derive(serde::Deserialize, Debug, Clone)]
-struct BashOutput {
-    pub stdout: Option<String>,
-    pub stderr: Option<String>,
-}
-
-#[derive(serde::Deserialize, Debug, Clone)]
-struct FileResponse {
-    pub content: Option<String>,
-    pub success: bool,
-    pub error: Option<String>,
-}
-
 #[async_trait]
 impl Runtime for RemoteRuntime {
     fn tools(&self) -> &[Box<dyn Tool>] {
@@ -39,9 +29,14 @@ impl Runtime for RemoteRuntime {
 
         if action == "cmd" {
             let command = args["command"].as_str().ok_or("Missing command")?;
+            let req = ExecuteBashRequest {
+                command: command.to_string(),
+                cwd: None,
+                timeout: None,
+            };
             let res = client
                 .post(format!("{}/bash/execute_bash_command", self.base_url))
-                .json(&serde_json::json!({ "command": command }))
+                .json(&req)
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
@@ -69,9 +64,12 @@ impl Runtime for RemoteRuntime {
 
         if action == "read_file" {
             let path = args["path"].as_str().ok_or("Missing path")?;
+            let req = FileReadRequest {
+                path: path.to_string(),
+            };
             let res = client
                 .post(format!("{}/file/read", self.base_url))
-                .json(&serde_json::json!({ "path": path }))
+                .json(&req)
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
@@ -91,9 +89,13 @@ impl Runtime for RemoteRuntime {
         if action == "write_file" {
             let path = args["path"].as_str().ok_or("Missing path")?;
             let content = args["content"].as_str().ok_or("Missing content")?;
+            let req = FileWriteRequest {
+                path: path.to_string(),
+                content: content.to_string(),
+            };
             let res = client
                 .post(format!("{}/file/write", self.base_url))
-                .json(&serde_json::json!({ "path": path, "content": content }))
+                .json(&req)
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;

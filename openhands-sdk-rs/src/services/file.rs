@@ -33,7 +33,6 @@ impl FileService {
     pub fn write_file(&self, req: FileWriteRequest) -> FileResponse {
         let path = self.workspace_dir.join(&req.path);
 
-        // Ensure parent directory exists
         if let Some(parent) = path.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
                 return FileResponse {
