@@ -1,4 +1,4 @@
-use openhands_sdk_rs::models::{BashEvent, ExecuteBashRequest, FileReadRequest, FileWriteRequest};
+use openhands_sdk_rs::models::{BashEvent, ExecuteBashRequest};
 use openhands_sdk_rs::runtime::bash::BashEventService;
 use openhands_sdk_rs::runtime::file::FileService;
 use rmcp::{
@@ -8,15 +8,17 @@ use rmcp::{
     service::RequestContext,
     tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler,
 };
-use serde::Deserialize;
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
 use crate::tools::file_editor::{run_file_editor, FileEditorArgs};
+use crate::tools::file_ops::{
+    run_delete_file, run_list_files, run_read_file, run_write_file, DeleteFileArgs, ListFilesArgs,
+    ReadFileArgs, WriteFileArgs,
+};
 use crate::tools::glob::{run_glob, GlobArgs};
 use crate::tools::grep::{run_grep, GrepArgs};
 use crate::tools::task_tracker::{run_task_tracker, TaskTrackerArgs};
@@ -34,27 +36,6 @@ pub struct ExecuteBashArgs {
     pub command: String,
     pub cwd: Option<String>,
     pub timeout: Option<u64>,
-}
-
-#[derive(serde::Deserialize, schemars::JsonSchema)]
-pub struct ReadFileArgs {
-    pub path: String,
-}
-
-#[derive(serde::Deserialize, schemars::JsonSchema)]
-pub struct WriteFileArgs {
-    pub path: String,
-    pub content: String,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-pub struct ListFilesArgs {
-    pub path: String,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-pub struct DeleteFileArgs {
-    pub path: String,
 }
 
 #[tool_router]
@@ -159,6 +140,13 @@ impl OpenHandsService {
                         }
                         result_str.push_str(stderr);
                     }
+                    if let Some(exit_code) = out.exit_code {
+                        if !result_str.is_empty() {
+                            result_str.push('\n');
+                        }
+                        result_str
+                            .push_str(&format!("[Command finished with exit code {}]", exit_code));
+                    }
                     return Ok(CallToolResult::success(vec![Content::text(result_str)]));
                 }
             }
@@ -179,24 +167,8 @@ impl OpenHandsService {
         &self,
         Parameters(args): Parameters<ReadFileArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let req = FileReadRequest {
-            path: args.path.clone(),
-        };
-        let res = self.file.read_file(req);
-        if res.success {
-            Ok(CallToolResult::success(vec![Content::text(
-                res.content.unwrap_or_default(),
-            )]))
-        } else {
-            Err(McpError {
-                code: ErrorCode(0),
-                message: res
-                    .error
-                    .unwrap_or_else(|| "Unknown error reading file".to_string())
-                    .into(),
-                data: None,
-            })
-        }
+        let output = run_read_file(&args, &self.file.workspace_dir)?;
+        Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 
     #[tool(
@@ -207,25 +179,8 @@ impl OpenHandsService {
         &self,
         Parameters(args): Parameters<WriteFileArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let req = FileWriteRequest {
-            path: args.path,
-            content: args.content,
-        };
-        let res = self.file.write_file(req);
-        if res.success {
-            Ok(CallToolResult::success(vec![Content::text(
-                "File written successfully",
-            )]))
-        } else {
-            Err(McpError {
-                code: ErrorCode(0),
-                message: res
-                    .error
-                    .unwrap_or_else(|| "Unknown error writing file".to_string())
-                    .into(),
-                data: None,
-            })
-        }
+        let output = run_write_file(&args, &self.file.workspace_dir)?;
+        Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 
     #[tool(
@@ -236,26 +191,8 @@ impl OpenHandsService {
         &self,
         Parameters(args): Parameters<ListFilesArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let path = self.file.workspace_dir.join(&args.path);
-        match fs::read_dir(path) {
-            Ok(entries) => {
-                let mut files = Vec::new();
-                for entry in entries.filter_map(Result::ok) {
-                    if let Some(name) = entry.file_name().to_str() {
-                        let type_str = if entry.path().is_dir() { "dir" } else { "file" };
-                        files.push(format!("{} ({})", name, type_str));
-                    }
-                }
-                Ok(CallToolResult::success(vec![Content::text(
-                    files.join("\n"),
-                )]))
-            }
-            Err(e) => Err(McpError {
-                code: ErrorCode(0),
-                message: e.to_string().into(),
-                data: None,
-            }),
-        }
+        let output = run_list_files(&args, &self.file.workspace_dir)?;
+        Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 
     #[tool(name = "delete_file", description = "Delete a file from the workspace")]
@@ -263,17 +200,8 @@ impl OpenHandsService {
         &self,
         Parameters(args): Parameters<DeleteFileArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let path = self.file.workspace_dir.join(&args.path);
-        match fs::remove_file(path) {
-            Ok(_) => Ok(CallToolResult::success(vec![Content::text(
-                "File deleted successfully",
-            )])),
-            Err(e) => Err(McpError {
-                code: ErrorCode(0),
-                message: e.to_string().into(),
-                data: None,
-            }),
-        }
+        let output = run_delete_file(&args, &self.file.workspace_dir)?;
+        Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 }
 
