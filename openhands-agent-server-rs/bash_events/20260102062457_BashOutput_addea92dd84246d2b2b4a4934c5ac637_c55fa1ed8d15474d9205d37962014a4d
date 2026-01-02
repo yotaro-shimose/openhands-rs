@@ -1,0 +1,10 @@
+{
+  "kind": "BashOutput",
+  "id": "c55fa1ed-8d15-474d-9205-d37962014a4d",
+  "timestamp": "2026-01-02T06:24:57.437058Z",
+  "command_id": "addea92d-d842-46d2-b2b4-a4934c5ac637",
+  "order": 0,
+  "exit_code": 0,
+  "stdout": "start_test\n",
+  "stderr": null
+}

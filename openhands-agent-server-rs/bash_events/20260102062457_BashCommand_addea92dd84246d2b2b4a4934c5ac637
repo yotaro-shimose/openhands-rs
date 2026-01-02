@@ -1,0 +1,8 @@
+{
+  "kind": "BashCommand",
+  "id": "addea92d-d842-46d2-b2b4-a4934c5ac637",
+  "timestamp": "2026-01-02T06:24:57.434530Z",
+  "command": "echo start_test",
+  "cwd": null,
+  "timeout": 10
+}
