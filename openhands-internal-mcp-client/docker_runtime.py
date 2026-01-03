@@ -7,8 +7,10 @@ from urllib.request import urlopen
 
 from agents.mcp import MCPServerStreamableHttp
 
+from openhands_agent.runtime import Runtime
 
-class DockerRuntime:
+
+class DockerRuntime(Runtime):
     """Context manager for running the MCP server inside a Docker container.
 
     Example:

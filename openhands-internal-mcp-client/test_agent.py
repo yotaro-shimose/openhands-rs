@@ -1,6 +1,6 @@
-"""Test script for the OpenHands Agent.
+"""Test script for the OpenHands Agent with LocalRuntime.
 
-This demonstrates how to use the OpenHands agent to solve coding tasks.
+This demonstrates running the agent with a local MCP server.
 """
 
 import asyncio
@@ -14,7 +14,8 @@ from agents.tracing.span_data import (
     AgentSpanData,
 )
 
-from openhands_agent import run_agent, AgentConfig
+from openhands_agent import OpenHandsAgent, AgentConfig
+from openhands_agent.runtime import LocalRuntime
 
 
 class AgentContentPrinter(TracingProcessor):
@@ -72,28 +73,31 @@ load_dotenv()
 
 
 async def main() -> None:
-    """Run a test task with the OpenHands agent."""
+    """Run a test task with the OpenHands agent using LocalRuntime."""
     config = AgentConfig.from_env()
     print(f"Connecting to MCP server at {config.mcp_url}...")
     print(f"Using model: {config.model}")
 
-    # Example task - create a simple Python script
-    task = """
-    Please do the following:
-    1. Create a Python file called 'fibonacci.py' that contains a function to calculate the nth Fibonacci number
-    2. The function should handle edge cases (n <= 0, n == 1, n == 2)
-    3. Add a main block that prints the first 10 Fibonacci numbers
-    4. Run the script to verify it works
-    """
+    # Use LocalRuntime to connect to running MCP server
+    async with LocalRuntime(url=config.mcp_url, timeout=config.timeout) as runtime:
+        async with OpenHandsAgent(runtime=runtime, config=config) as agent:
+            # Example task - create a simple Python script
+            task = """
+            Please do the following:
+            1. Create a Python file called 'fibonacci.py' that contains a function to calculate the nth Fibonacci number
+            2. The function should handle edge cases (n <= 0, n == 1, n == 2)
+            3. Add a main block that prints the first 10 Fibonacci numbers
+            4. Run the script to verify it works
+            """
 
-    print(f"\n📋 Task: {task.strip()}")
-    print("\n" + "=" * 60)
+            print(f"\n📋 Task: {task.strip()}")
+            print("\n" + "=" * 60)
 
-    result = await run_agent(task, config)
+            result = await agent.run(task)
 
-    print("\n" + "=" * 60)
-    print("\n✅ Final Output:")
-    print(result.final_output)
+            print("\n" + "=" * 60)
+            print("\n✅ Final Output:")
+            print(result.final_output)
 
 
 if __name__ == "__main__":

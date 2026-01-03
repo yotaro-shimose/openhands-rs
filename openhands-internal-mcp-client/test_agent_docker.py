@@ -4,9 +4,6 @@ This demonstrates running the agent inside a Docker container for isolated execu
 """
 
 import asyncio
-import sys
-
-sys.path.insert(0, ".")
 
 from dotenv import load_dotenv
 
@@ -82,11 +79,11 @@ async def main() -> None:
     print("Starting DockerRuntime...")
 
     # Start DockerRuntime with the MCP server
-    async with DockerRuntime(image_name="openhands-agent-server-rs") as mcp_server:
+    async with DockerRuntime(image_name="openhands-agent-server-rs") as runtime:
         print("DockerRuntime started, connecting agent...")
 
-        # Create agent with the Docker MCP server
-        async with OpenHandsAgent(config=config, mcp_server=mcp_server) as agent:
+        # Create agent with the Docker runtime
+        async with OpenHandsAgent(runtime=runtime, config=config) as agent:
             # Example task - create a simple Python script
             task = """
             Please do the following:

@@ -14,60 +14,44 @@ from openhands_agent.prompts import SYSTEM_PROMPT
 class OpenHandsAgent:
     """OpenHands-compatible agent using openai-agents-sdk with MCP tools.
 
-    This agent connects to an MCP server to access file operations, bash execution,
+    This agent connects to a runtime to access file operations, bash execution,
     and other tools, using OpenHands-aligned system prompts for consistent behavior.
 
-    Example with local MCP server:
-        async with OpenHandsAgent() as agent:
-            result = await agent.run("Create a hello world script")
-            print(result.final_output)
+    Example with LocalRuntime (requires running MCP server):
+        from openhands_agent import OpenHandsAgent, LocalRuntime
 
-    Example with DockerRuntime:
+        async with LocalRuntime() as runtime:
+            async with OpenHandsAgent(runtime=runtime) as agent:
+                result = await agent.run("Create a hello world script")
+                print(result.final_output)
+
+    Example with DockerRuntime (self-contained):
         from docker_runtime import DockerRuntime
+        from openhands_agent import OpenHandsAgent
 
-        async with DockerRuntime(image_name="openhands-agent-server-rs") as mcp_server:
-            async with OpenHandsAgent(mcp_server=mcp_server) as agent:
+        async with DockerRuntime(image_name="openhands-agent-server-rs") as runtime:
+            async with OpenHandsAgent(runtime=runtime) as agent:
                 result = await agent.run("Create a hello world script")
                 print(result.final_output)
     """
 
     def __init__(
         self,
+        runtime: MCPServerStreamableHttp,
         config: AgentConfig | None = None,
-        mcp_server: MCPServerStreamableHttp | None = None,
     ):
-        """Initialize the agent with configuration.
+        """Initialize the agent with a runtime.
 
         Args:
+            runtime: MCP server from a Runtime (LocalRuntime, DockerRuntime, etc.)
             config: Agent configuration. If None, loads from environment.
-            mcp_server: Optional pre-configured MCP server (e.g., from DockerRuntime).
-                       If provided, skips creating a new MCP connection.
         """
         self.config = config or AgentConfig.from_env()
-        self._external_mcp_server = mcp_server
-        self._mcp_server: MCPServerStreamableHttp | None = None
-        self._owns_mcp_server = False
+        self._mcp_server = runtime
         self._agent: Agent | None = None
 
     async def __aenter__(self) -> "OpenHandsAgent":
-        """Enter async context and connect to MCP server."""
-        if self._external_mcp_server:
-            # Use externally provided MCP server (e.g., from DockerRuntime)
-            self._mcp_server = self._external_mcp_server
-            self._owns_mcp_server = False
-        else:
-            # Create our own MCP connection
-            self._mcp_server = MCPServerStreamableHttp(
-                name="OpenHands MCP Server",
-                params={
-                    "url": self.config.mcp_url,
-                    "timeout": self.config.timeout,
-                },
-                cache_tools_list=False,
-            )
-            await self._mcp_server.__aenter__()
-            self._owns_mcp_server = True
-
+        """Enter async context and initialize agent."""
         self._agent = Agent(
             name="OpenHands Agent",
             instructions=SYSTEM_PROMPT,
@@ -78,10 +62,9 @@ class OpenHandsAgent:
         return self
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """Exit async context and cleanup MCP connection."""
-        # Only cleanup MCP server if we own it (didn't receive it externally)
-        if self._mcp_server and self._owns_mcp_server:
-            await self._mcp_server.__aexit__(exc_type, exc_val, exc_tb)
+        """Exit async context."""
+        # Runtime handles MCP server cleanup, we just cleanup agent state
+        self._agent = None
 
     async def run(self, task: str) -> RunResult:
         """Run the agent with a task.
@@ -103,25 +86,32 @@ class OpenHandsAgent:
 
 async def run_agent(
     task: str,
+    runtime: MCPServerStreamableHttp | None = None,
     config: AgentConfig | None = None,
-    mcp_server: MCPServerStreamableHttp | None = None,
 ) -> RunResult:
     """Convenience function to run a task with the OpenHands agent.
 
-    This is a simple wrapper that creates an agent, runs the task, and returns
-    the result. For multiple tasks, use OpenHandsAgent context manager directly.
-
     Args:
         task: The task to execute
+        runtime: MCP server from a Runtime. If None, uses LocalRuntime.
         config: Optional agent configuration
-        mcp_server: Optional pre-configured MCP server (e.g., from DockerRuntime)
 
     Returns:
         RunResult containing the agent's output
 
-    Example:
-        result = await run_agent("Fix the bug in main.py")
-        print(result.final_output)
+    Example with explicit runtime:
+        async with DockerRuntime(image_name="openhands-agent-server-rs") as runtime:
+            result = await run_agent("Fix the bug", runtime=runtime)
+            print(result.final_output)
+
+    Example with default LocalRuntime:
+        # Requires MCP server running on localhost:3000
+        async with LocalRuntime() as runtime:
+            result = await run_agent("Fix the bug", runtime=runtime)
+            print(result.final_output)
     """
-    async with OpenHandsAgent(config, mcp_server) as agent:
+    if runtime is None:
+        raise ValueError("runtime is required. Use LocalRuntime() or DockerRuntime().")
+
+    async with OpenHandsAgent(runtime=runtime, config=config) as agent:
         return await agent.run(task)
