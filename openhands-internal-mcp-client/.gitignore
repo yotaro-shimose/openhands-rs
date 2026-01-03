@@ -8,3 +8,4 @@ rust_debug_workspace/
 rust_test_workspace/
 .sccache_shared/
 sccache_backup/
+docker_workspace/
