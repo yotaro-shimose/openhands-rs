@@ -42,6 +42,7 @@ class RustCodingEnvironment(DockerRuntime):
         vols[str(self.workspace_dir)] = "/workspace"
 
         super().__init__(
+            workspace_dir=str(self.workspace_dir),
             image_name=image_name,
             container_name=container_name,
             host_port=host_port,

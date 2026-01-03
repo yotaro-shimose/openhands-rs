@@ -79,7 +79,7 @@ async def main() -> None:
     print("Starting DockerRuntime...")
 
     # Start DockerRuntime with the MCP server
-    async with DockerRuntime(image_name="openhands-agent-server-rs") as runtime:
+    async with DockerRuntime(workspace_dir="./docker_workspace") as runtime:
         print("DockerRuntime started, connecting agent...")
 
         # Create agent with the Docker runtime

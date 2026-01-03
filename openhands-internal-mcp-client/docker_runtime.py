@@ -13,30 +13,56 @@ from openhands_agent.runtime import Runtime
 class DockerRuntime(Runtime):
     """Context manager for running the MCP server inside a Docker container.
 
+    The workspace_dir is required to ensure files persist after the container stops.
+    It will be mounted to /workspace inside the container.
+
     Example:
-        async with DockerRuntime(image_name="openhands-agent-server-rs") as server:
-            agent = Agent(..., mcp_servers=[server])
-            ...
+        async with DockerRuntime(
+            workspace_dir="/path/to/my/project",
+            image_name="openhands-agent-server-rs"
+        ) as runtime:
+            async with OpenHandsAgent(runtime=runtime) as agent:
+                result = await agent.run("Create hello.py")
+                # Files will be saved to /path/to/my/project
     """
 
     def __init__(
         self,
-        image_name: str,
+        workspace_dir: str,
+        image_name: str = "openhands-agent-server-rs",
         container_name: Optional[str] = None,
         host_port: Optional[int] = None,
         env_vars: Optional[Dict[str, str]] = None,
         volumes: Optional[Dict[str, str]] = None,
         port_mappings: Optional[List[str]] = None,
     ):
+        """Initialize DockerRuntime.
+
+        Args:
+            workspace_dir: Host directory to mount as /workspace in container (required).
+                          All file operations go here and persist after container stops.
+            image_name: Docker image to run (default: openhands-agent-server-rs)
+            container_name: Optional custom container name
+            host_port: Optional fixed host port (otherwise dynamically assigned)
+            env_vars: Additional environment variables for the container
+            volumes: Additional volume mounts {host_path: container_path}
+            port_mappings: Additional port mappings
+        """
+        # Resolve workspace path and ensure it exists
+        self.workspace_dir = Path(workspace_dir).resolve()
+        self.workspace_dir.mkdir(parents=True, exist_ok=True)
+
         self.image_name = image_name
         self.container_name = container_name or f"mcp-server-{uuid.uuid4().hex[:8]}"
         self.host_port = host_port
         self.env_vars = env_vars or {}
-        # Store volumes as absolute host paths
-        self.volumes = {}
+
+        # Auto-mount workspace_dir to /workspace, plus any additional volumes
+        self.volumes = {str(self.workspace_dir): "/workspace"}
         if volumes:
             for host_path, container_path in volumes.items():
                 self.volumes[str(Path(host_path).resolve())] = container_path
+
         self.port_mappings = port_mappings or []
         self._container_id: Optional[str] = None
 

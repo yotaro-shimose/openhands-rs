@@ -15,15 +15,15 @@ async def main() -> None:
 
     print(f"--- Starting Docker Runtime Test with image: {image_name} ---")
 
-    # Define some environment variables and a volume mount for testing
+    # Define some environment variables for testing
     env_vars = {"TEST_VAR": "HelloFromDocker"}
-    # Mount the current directory to /workspace/test_mount inside the container
+    # Use the current directory as workspace
     current_dir = os.getcwd()
-    volumes = {current_dir: "/workspace/test_mount"}
 
     try:
         async with DockerRuntime(
-            image_name=image_name, env_vars=env_vars, volumes=volumes
+            workspace_dir=current_dir,
+            env_vars=env_vars,
         ) as server:
             agent = Agent(
                 name="Docker Test Assistant",
