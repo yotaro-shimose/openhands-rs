@@ -1,4 +1,10 @@
-.venv/
+*.pyc
 __pycache__/
-*.txt
-.env
+.python-version
+.venv/
+venv/
+*.egg-info/
+rust_debug_workspace/
+rust_test_workspace/
+.sccache_shared/
+sccache_backup/
