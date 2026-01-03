@@ -1,7 +1,7 @@
 import asyncio
-import os
 import time
 import uuid
+from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.request import urlopen
 
@@ -30,7 +30,11 @@ class DockerRuntime:
         self.container_name = container_name or f"mcp-server-{uuid.uuid4().hex[:8]}"
         self.host_port = host_port
         self.env_vars = env_vars or {}
-        self.volumes = volumes or {}
+        # Store volumes as absolute host paths
+        self.volumes = {}
+        if volumes:
+            for host_path, container_path in volumes.items():
+                self.volumes[str(Path(host_path).resolve())] = container_path
         self.port_mappings = port_mappings or []
         self._container_id: Optional[str] = None
 
@@ -51,11 +55,6 @@ class DockerRuntime:
             )
 
         # 2. Prepare docker run command
-        if self.host_port:
-            port_spec = f"{self.host_port}:3000"
-        else:
-            port_spec = "3000"
-
         cmd = [
             "docker",
             "run",
@@ -63,9 +62,14 @@ class DockerRuntime:
             "--name",
             self.container_name,
             "--rm",
-            "-p",
-            port_spec,
         ]
+
+        # Add port mapping
+        if self.host_port:
+            cmd.extend(["-p", f"{self.host_port}:3000"])
+        else:
+            # Use -P to publish all exposed ports with random host ports
+            cmd.append("-P")
 
         # Add environment variables
         for k, v in self.env_vars.items():
@@ -73,9 +77,7 @@ class DockerRuntime:
 
         # Add volumes
         for host_path, container_path in self.volumes.items():
-            # Ensure host path is absolute
-            abs_host_path = os.path.abspath(host_path)
-            cmd.extend(["-v", f"{abs_host_path}:{container_path}"])
+            cmd.extend(["-v", f"{host_path}:{container_path}"])
 
         # Add extra port mappings
         for mapping in self.port_mappings:
@@ -95,6 +97,9 @@ class DockerRuntime:
 
         # If host_port was not specified, find what Docker assigned
         if not self.host_port:
+            # Give Docker a moment to set up port mappings
+            await asyncio.sleep(0.5)
+
             proc = await asyncio.create_subprocess_exec(
                 "docker",
                 "port",
@@ -103,16 +108,24 @@ class DockerRuntime:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, _ = await proc.communicate()
+            stdout, stderr = await proc.communicate()
             if proc.returncode != 0:
-                raise RuntimeError("Failed to get assigned port from Docker.")
+                raise RuntimeError(
+                    f"Failed to get assigned port from Docker.\n"
+                    f"stderr: {stderr.decode()}\n"
+                    f"stdout: {stdout.decode()}"
+                )
             # stdout is something like "0.0.0.0:49483\n:::49483"
-            for line in stdout.decode().splitlines():
+            port_output = stdout.decode()
+            for line in port_output.splitlines():
                 if ":" in line:
                     self.host_port = int(line.split(":")[-1])
                     break
             if not self.host_port:
-                raise RuntimeError("Could not determine assigned port from Docker.")
+                raise RuntimeError(
+                    f"Could not determine assigned port from Docker.\n"
+                    f"Port output: {port_output}"
+                )
 
         print(
             f"🚀 Started Docker container '{self.container_name}' on port {self.host_port}."

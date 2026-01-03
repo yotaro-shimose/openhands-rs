@@ -10,6 +10,7 @@ use rmcp::transport::{
 };
 use service::OpenHandsService;
 use std::env;
+use std::path::PathBuf;
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -20,10 +21,14 @@ async fn main() {
     openhands_sdk_rs::logger::init_logging();
 
     let cwd = env::current_dir().unwrap();
-    let bash_events_dir = cwd.join("bash_events");
 
-    let bash_service = BashEventService::new(bash_events_dir);
-    let file_service = FileService::new(cwd.join("workspace"));
+    let bash_service = BashEventService::new(cwd.join("bash_events"));
+
+    // Use WORKSPACE_DIR env var if set, otherwise default to current_dir/workspace
+    let workspace_path = env::var("WORKSPACE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| cwd.join("workspace"));
+    let file_service = FileService::new(workspace_path);
 
     // Create the MCP service
     let openhands_service = OpenHandsService::new(bash_service, file_service);
