@@ -1,0 +1,104 @@
+"""Tests for OpenHands agent core functionality.
+
+Uses DockerRuntime for isolated testing with LLM-as-a-judge evaluation.
+"""
+
+import pytest
+from pathlib import Path
+
+from agents.tracing import add_trace_processor
+
+from openhands_agent import OpenHandsAgent, AgentConfig
+from openhands_agent.tracing import AgentContentPrinter
+from tests.conftest import llm_judge
+
+
+# Enable tracing for test visibility
+add_trace_processor(AgentContentPrinter())
+
+
+@pytest.mark.asyncio
+async def test_create_file(
+    docker_runtime, temp_workspace: Path, agent_config: AgentConfig
+):
+    """Test that agent can create a simple file."""
+    async with OpenHandsAgent(runtime=docker_runtime, config=agent_config) as agent:
+        task = "Create a Python file called 'hello.py' that prints 'Hello, World!'"
+        result = await agent.run(task)
+
+        # Verify file exists on host
+        hello_file = temp_workspace / "hello.py"
+        assert hello_file.exists(), f"Expected {hello_file} to exist"
+
+        # LLM-as-a-judge verification
+        passed, explanation = await llm_judge(
+            task_description=task,
+            agent_output=result.final_output,
+            criteria=[
+                "Agent created a Python file named hello.py",
+                "Agent indicated the task was completed successfully",
+            ],
+        )
+        assert passed, f"LLM judge failed: {explanation}"
+
+
+@pytest.mark.asyncio
+async def test_run_script(
+    docker_runtime, temp_workspace: Path, agent_config: AgentConfig
+):
+    """Test that agent can create and execute a script."""
+    async with OpenHandsAgent(runtime=docker_runtime, config=agent_config) as agent:
+        task = """
+        1. Create a Python file called 'fib.py' with a function that returns the nth Fibonacci number
+        2. Run the script to print fib(10)
+        """
+        result = await agent.run(task)
+
+        # Verify file exists
+        fib_file = temp_workspace / "fib.py"
+        assert fib_file.exists(), f"Expected {fib_file} to exist"
+
+        # LLM-as-a-judge verification
+        passed, explanation = await llm_judge(
+            task_description=task,
+            agent_output=result.final_output,
+            criteria=[
+                "Agent created a Python file with Fibonacci function",
+                "Agent executed the script",
+                "Agent showed correct output for fib(10) which is 55",
+            ],
+        )
+        assert passed, f"LLM judge failed: {explanation}"
+
+
+@pytest.mark.asyncio
+async def test_edit_file(
+    docker_runtime, temp_workspace: Path, agent_config: AgentConfig
+):
+    """Test that agent can edit an existing file."""
+    # Pre-create a file
+    test_file = temp_workspace / "greeting.py"
+    test_file.write_text('message = "Hello"\nprint(message)')
+
+    async with OpenHandsAgent(runtime=docker_runtime, config=agent_config) as agent:
+        task = (
+            "Edit greeting.py to change the message from 'Hello' to 'Hello, OpenHands!'"
+        )
+        result = await agent.run(task)
+
+        # Verify file was edited
+        content = test_file.read_text()
+        assert "OpenHands" in content, (
+            f"Expected 'OpenHands' in file content: {content}"
+        )
+
+        # LLM-as-a-judge verification
+        passed, explanation = await llm_judge(
+            task_description=task,
+            agent_output=result.final_output,
+            criteria=[
+                "Agent modified the greeting.py file",
+                "Agent changed the message to include 'OpenHands'",
+            ],
+        )
+        assert passed, f"LLM judge failed: {explanation}"

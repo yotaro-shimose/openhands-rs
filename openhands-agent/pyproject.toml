@@ -1,0 +1,19 @@
+[project]
+name = "openhands-agent"
+version = "0.1.0"
+description = "OpenHands-quality coding agent using openai-agents-sdk"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.25.0",
+    "openai>=1.0.0",
+    "openai-agents>=0.6.4",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
+
