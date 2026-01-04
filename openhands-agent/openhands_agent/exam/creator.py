@@ -1,4 +1,3 @@
-import shutil
 import tempfile
 from pathlib import Path
 
@@ -24,7 +23,8 @@ async def create_exam(
     2.  **Generate Problem**: The agent reverts the solution code to a "problem" state,
         leaving scaffolding and failing tests, without touching question/rubric.
 
-    The result is a git history where the "Problem" commit is the parent of the "Solution" commit.
+    The result is a git history where the "Problem" commit is the child of the "Solution" commit.
+    (Base -> Solution -> Problem)
     """
     # Create a temporary directory for the workspace
     # We use a persistent temp dir so it survives the function call if needed,
@@ -80,11 +80,17 @@ async def create_exam(
             # Verify tests pass (optional but good sanity check)
             # In a real impl, we might check result.final_output or run a validation step.
 
-        # Snapshot Solution State
-        # Copy everything to a backup
-        solution_backup = Path(tempfile.mkdtemp(prefix="exam_solution_backup_"))
-        shutil.copytree(work_dir, solution_backup, dirs_exist_ok=True)
-        logger.info(f"Backed up solution state to {solution_backup}")
+        # 3.1 Commit Solution State
+        logger.info("Committing Solution State...")
+        workspace_repo.add(".")
+
+        # DEBUG: Check status before commit
+        status = workspace_repo.run_git(["status"])
+        logger.debug(f"Git Status before Solution commit:\n{status}")
+
+        workspace_repo.commit("Exam Solution: Reference Implementation")
+        solution_commit = workspace_repo.rev_parse("HEAD")
+        logger.info(f"Solution Commit: {solution_commit}")
 
         # Phase 2: Generate Problem
         # Re-initialize runtime (fresh agent state recommended for clean context)
@@ -111,13 +117,11 @@ async def create_exam(
             # history includes the initial prompt and the agent's response(s) from Phase 1
             await agent.run(history + [new_message])
 
-        # Phase 3: Finalize Git History
-
-        # 3.1 Commit Problem State
+        # 3.2 Commit Problem State
         logger.info("Committing Problem State...")
+        # Check if there are changes to commit (reverted code)
         workspace_repo.add(".")
 
-        # DEBUG: Check status before commit
         status = workspace_repo.run_git(["status"])
         logger.debug(f"Git Status before Problem commit:\n{status}")
 
@@ -125,41 +129,8 @@ async def create_exam(
         problem_commit = workspace_repo.rev_parse("HEAD")
         logger.info(f"Problem Commit: {problem_commit}")
 
-        # 3.2 Restore Solution State on top
-        # We delete current files and restore from backup to ensure we have the EXACT solution state
-        # (excluding .git to preserve the problem commit history)
-        logger.info("Restoring Solution State...")
-        for item in work_dir.iterdir():
-            if item.name != ".git":
-                if item.is_dir():
-                    shutil.rmtree(item)
-                else:
-                    item.unlink()
-
-        for item in solution_backup.iterdir():
-            if item.name != ".git":
-                dest = work_dir / item.name
-                if item.is_dir():
-                    shutil.copytree(item, dest)
-                else:
-                    shutil.copy2(item, dest)
-
-        # 3.3 Commit Solution State
-        logger.info("Committing Solution State...")
-        workspace_repo.add(".")
-
-        # DEBUG: Check status before commit
-        status = workspace_repo.run_git(["status"])
-        logger.debug(f"Git Status before Solution commit:\n{status}")
-
-        workspace_repo.commit("Exam Solution: Reference Implementation")
-        solution_commit = workspace_repo.rev_parse("HEAD")
-        logger.info(f"Solution Commit: {solution_commit}")
-
-        # Cleanup backup
-        shutil.rmtree(solution_backup)
-
         # Retrieve question and rubric content
+        # Note: These files should exist in both states
         question = (work_dir / "question.md").read_text()
         rubric = (work_dir / "rubric.md").read_text()
 
@@ -188,7 +159,7 @@ async def create_exam(
         workspace_repo.run_git(["push", "origin", f"HEAD:refs/heads/{branch_name}"])
         logger.info(f"Pushed to branch {branch_name}")
 
-        # Note: solution_commit is HEAD, problem_commit is its ancestor.
+        # Note: solution_commit is Ancestor of problem_commit.
         # Both are now available in the remote repo under that branch.
 
         # NOTE: The caller is responsible for moving `work_dir` (the new repo)

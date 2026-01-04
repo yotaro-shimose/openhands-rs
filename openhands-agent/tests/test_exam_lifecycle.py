@@ -1,3 +1,4 @@
+from pathlib import Path
 import pytest
 from openhands_agent.exam.creator import create_exam
 from openhands_agent.exam.runner import solve_exam, evaluate_exam
@@ -8,7 +9,7 @@ from tests.utils import setup_test_repos
 
 
 @pytest.mark.asyncio
-async def test_create_exam_live(tmp_path):
+async def test_create_exam_live(tmp_path: Path):
     """Live test of create_exam with real agent execution."""
     project_repo, lib_repo = setup_test_repos(tmp_path / "test_repos")
 
@@ -35,28 +36,32 @@ async def test_create_exam_live(tmp_path):
 
     # Verify Git History Relationship
     repo = exam.project
-    # solution_commit should be a descendant of problem_commit
+    # Solution commit should be an ancestor of Problem commit (Base -> Solution -> Problem)
     try:
         repo.run_git(
-            ["merge-base", "--is-ancestor", exam.problem_commit, exam.solution_commit]
+            ["merge-base", "--is-ancestor", exam.solution_commit, exam.problem_commit]
         )
     except Exception:
-        pytest.fail("Problem commit is NOT an ancestor of Solution commit")
+        pytest.fail("Solution commit is NOT an ancestor of Problem commit")
 
-    # Verify Content in Solution State (HEAD)
-    # HEAD should have the full solution
+    # Verify Content in Problem State (HEAD)
+    # HEAD should be the Problem Commit (most recent)
     head_files = repo.run_git(["ls-tree", "-r", "HEAD", "--name-only"]).splitlines()
     assert "src/solution.rs" in head_files
-    # Check content contains implementation
-    sol_content = (repo.local_dir / "src/solution.rs").read_text()
-    assert "true" in sol_content
-
-    # Verify Content in Problem State
-    # Checkout problem commit and check files
-    repo.run_git(["checkout", exam.problem_commit])
+    # Check content contains stubs (Problem State)
     prob_content = (repo.local_dir / "src/solution.rs").read_text()
-    # Should be stubbed or empty
-    assert "true" not in prob_content or "todo!" in prob_content
+    # Should be stubbed (returning false) or empty (todo!)
+    # We check for presence of a failing condition rather than absence of "true"
+    # because comments might contain "true".
+    print(f"Problem Content:\n{prob_content}")
+    assert "false" in prob_content or "todo!" in prob_content
+
+    # Verify Content in Solution State
+    # Checkout solution commit and check files
+    repo.run_git(["checkout", exam.solution_commit])
+    sol_content = (repo.local_dir / "src/solution.rs").read_text()
+    assert "todo!" not in sol_content
+    assert "pub fn solution()" in sol_content
 
     # Verify Push to Original Repo
     branch_name = f"exam-{exam.id}"
@@ -66,7 +71,8 @@ async def test_create_exam_live(tmp_path):
     # Verify we can checkout the commits in the original repo
     project_repo.run_git(["checkout", branch_name])
     head_commit = project_repo.run_git(["rev-parse", "HEAD"])
-    assert head_commit.strip() == exam.solution_commit.strip()
+    # The branch tip should be the Problem Commit
+    assert head_commit.strip() == exam.problem_commit.strip()
 
     # --- Test solve_exam ---
     print("\nTesting solve_exam...")
