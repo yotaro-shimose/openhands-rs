@@ -1,3 +1,4 @@
+from oai_utils.agent import AgentsSDKModel
 from pathlib import Path
 import pytest
 from openhands_agent.exam.creator import create_exam
@@ -9,7 +10,7 @@ from tests.utils import setup_test_repos
 
 
 @pytest.mark.asyncio
-async def test_create_exam_live(tmp_path: Path):
+async def test_create_exam_live(model: AgentsSDKModel, tmp_path: Path):
     """Live test of create_exam with real agent execution."""
     project_repo, lib_repo = setup_test_repos(tmp_path / "test_repos")
 
@@ -24,7 +25,7 @@ async def test_create_exam_live(tmp_path: Path):
 
     # Execute create_exam (this runs the real agent)
     # We expect this to take some time and consume tokens
-    exam = await create_exam(project_repo, lib_repo, topic)
+    exam = await create_exam(model, project_repo, lib_repo, topic)
 
     # Basic Validations
     print(f"Exam ID: {exam.id}")
@@ -76,7 +77,7 @@ async def test_create_exam_live(tmp_path: Path):
 
     # --- Test solve_exam ---
     print("\nTesting solve_exam...")
-    solution_path = await solve_exam(exam)
+    solution_path = await solve_exam(model, exam)
 
     # Check if solution exists in the new workspace
     print(f"Solution Path: {solution_path}")
@@ -88,7 +89,7 @@ async def test_create_exam_live(tmp_path: Path):
 
     # --- Test evaluate_exam ---
     print("\nTesting evaluate_exam...")
-    report = await evaluate_exam(exam, solution_path)
+    report = await evaluate_exam(model, exam, solution_path)
     print(f"Evaluation Report:\n{report}")
 
     # Check for score report

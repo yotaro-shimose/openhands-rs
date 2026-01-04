@@ -10,3 +10,5 @@ software-agent-sdk
 **/alignment_test
 .sccache
 .vscode
+
+repositories

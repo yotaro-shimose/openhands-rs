@@ -4,6 +4,8 @@ Provides reusable fixtures for runtimes and configurations.
 Uses LLM-as-a-judge pattern for testing (no mocks).
 """
 
+from oai_utils.agent import AgentsSDKModel
+from agents.extensions.models.litellm_model import LitellmModel
 import pytest
 import pytest_asyncio
 from pathlib import Path
@@ -12,18 +14,21 @@ from dotenv import load_dotenv
 from agents.mcp import MCPServerStreamableHttp
 
 
-from openhands_agent import OpenHandsAgent, AgentConfig
+from openhands_agent import OpenHandsAgent
 from openhands_agent.runtime import LocalRuntime
 from openhands_agent.runtime.docker_runtime import DockerRuntime
+import os
 
 # Load environment variables (OPENAI_API_KEY, etc.)
 load_dotenv()
 
 
 @pytest.fixture
-def agent_config() -> AgentConfig:
-    """Load agent configuration from environment."""
-    return AgentConfig.from_env()
+def model():
+    return LitellmModel(
+        model="gemini/gemini-3-flash-preview",
+        api_key=os.getenv("GOOGLE_API_KEY"),
+    )
 
 
 @pytest.fixture
@@ -35,29 +40,28 @@ def temp_workspace(tmp_path: Path) -> Path:
 
 
 @pytest_asyncio.fixture
-async def docker_runtime(temp_workspace: Path, agent_config: AgentConfig):
+async def docker_runtime(temp_workspace: Path):
     """Create a DockerRuntime with temporary workspace and an OpenHandsAgent."""
     async with DockerRuntime(workspace_dir=str(temp_workspace)) as runtime:
-        agent = OpenHandsAgent(mcp_server=runtime, config=agent_config)
-        yield agent
+        yield runtime
 
 
 @pytest_asyncio.fixture
-async def local_runtime(agent_config: AgentConfig):
+async def local_runtime():
     """Create a LocalRuntime (requires running MCP server)."""
     async with LocalRuntime(
-        url=agent_config.mcp_url,
-        timeout=agent_config.timeout,
+        url="http://localhost:3000",
+        timeout=30,
     ) as runtime:
         yield runtime
 
 
 async def llm_judge(
+    model: AgentsSDKModel,
     mcp_server: MCPServerStreamableHttp,
     task_description: str,
     agent_output: str,
     criteria: list[str],
-    config: AgentConfig | None = None,
 ) -> tuple[bool, str]:
     """Use another OpenHandsAgent as judge to evaluate agent output.
 
@@ -74,11 +78,6 @@ async def llm_judge(
     Returns:
         Tuple of (passed: bool, explanation: str)
     """
-    judge_config = config or AgentConfig(
-        mcp_url="",  # Not used, we pass mcp_server directly
-        model="gpt-4o-mini",
-        timeout=30,
-    )
 
     criteria_text = "\n".join(f"- {c}" for c in criteria)
 
@@ -101,7 +100,7 @@ INSTRUCTIONS:
 PASSED: yes/no
 EXPLANATION: <brief explanation of your findings>"""
 
-    judge = OpenHandsAgent(mcp_server=mcp_server, config=judge_config)
+    judge = OpenHandsAgent.create(model=model, mcp_server=mcp_server)
     result = await judge.run(judge_task)
 
     output = result.final_output or ""

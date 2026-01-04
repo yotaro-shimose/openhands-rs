@@ -3,12 +3,14 @@
 Uses DockerRuntime for isolated testing with LLM-as-a-judge evaluation.
 """
 
+from oai_utils.agent import AgentsSDKModel
+from openhands_agent.runtime.docker_runtime import DockerRuntime
 import pytest
 from pathlib import Path
 
 from agents.tracing import add_trace_processor
 
-from openhands_agent import OpenHandsAgent, AgentConfig
+from openhands_agent import OpenHandsAgent
 from openhands_agent.tracing import AgentContentPrinter
 from tests.conftest import llm_judge
 
@@ -19,11 +21,11 @@ add_trace_processor(AgentContentPrinter())
 
 @pytest.mark.asyncio
 async def test_create_file(
-    docker_runtime, temp_workspace: Path, agent_config: AgentConfig
+    model: AgentsSDKModel, docker_runtime: DockerRuntime, temp_workspace: Path
 ):
     """Test that agent can create a simple file."""
     async with docker_runtime as mcp_server:
-        agent = OpenHandsAgent(mcp_server=mcp_server, config=agent_config)
+        agent = OpenHandsAgent.create(model=model, mcp_server=mcp_server)
         task = "Create a Python file called 'hello.py' that prints 'Hello, World!'"
         result = await agent.run(task)
 
@@ -33,6 +35,7 @@ async def test_create_file(
 
         # LLM-as-a-judge verification
         passed, explanation = await llm_judge(
+            model=model,
             mcp_server=mcp_server,
             task_description=task,
             agent_output=result.final_output,
@@ -46,11 +49,11 @@ async def test_create_file(
 
 @pytest.mark.asyncio
 async def test_run_script(
-    docker_runtime, temp_workspace: Path, agent_config: AgentConfig
+    model: AgentsSDKModel, docker_runtime: DockerRuntime, temp_workspace: Path
 ):
     """Test that agent can create and execute a script."""
     async with docker_runtime as mcp_server:
-        agent = OpenHandsAgent(mcp_server=mcp_server, config=agent_config)
+        agent = OpenHandsAgent.create(model=model, mcp_server=mcp_server)
         task = """
         1. Create a Python file called 'fib.py' with a function that returns the nth Fibonacci number
         2. Run the script to print fib(10)
@@ -63,6 +66,7 @@ async def test_run_script(
 
         # LLM-as-a-judge verification
         passed, explanation = await llm_judge(
+            model=model,
             mcp_server=mcp_server,
             task_description=task,
             agent_output=result.final_output,
@@ -77,14 +81,14 @@ async def test_run_script(
 
 @pytest.mark.asyncio
 async def test_edit_file(
-    docker_runtime, temp_workspace: Path, agent_config: AgentConfig
+    model: AgentsSDKModel, docker_runtime: DockerRuntime, temp_workspace: Path
 ):
     """Test that agent can edit an existing file."""
     # Pre-create a file
     test_file = temp_workspace / "greeting.py"
     test_file.write_text('message = "Hello"\nprint(message)')
     async with docker_runtime as mcp_server:
-        agent = OpenHandsAgent(mcp_server=mcp_server, config=agent_config)
+        agent = OpenHandsAgent.create(model=model, mcp_server=mcp_server)
         task = (
             "Edit greeting.py to change the message from 'Hello' to 'Hello, OpenHands!'"
         )
@@ -98,6 +102,7 @@ async def test_edit_file(
 
         # LLM-as-a-judge verification
         passed, explanation = await llm_judge(
+            model=model,
             mcp_server=mcp_server,
             task_description=task,
             agent_output=result.final_output,

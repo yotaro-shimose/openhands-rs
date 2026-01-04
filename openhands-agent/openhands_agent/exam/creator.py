@@ -1,3 +1,4 @@
+from oai_utils.agent import AgentsSDKModel
 import tempfile
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from openhands_agent.runtime.rust_env import RustCodingEnvironment
 
 
 async def create_exam(
+    model: AgentsSDKModel,
     project_repo: GitRepository,
     library_repo: GitRepository,
     topic: Topic,
@@ -52,7 +54,7 @@ async def create_exam(
 
         # Initialize Runtime
         async with RustCodingEnvironment(workspace_dir=work_dir) as runtime:
-            agent = OpenHandsAgent(mcp_server=runtime)
+            agent = OpenHandsAgent.create(model=model, mcp_server=runtime)
 
             # Phase 1: Generate Solution
             logger.info("Phase 1: Generating Solution...")
@@ -95,7 +97,7 @@ async def create_exam(
         # Phase 2: Generate Problem
         # Re-initialize runtime (fresh agent state recommended for clean context)
         async with RustCodingEnvironment(workspace_dir=work_dir) as runtime:
-            agent = OpenHandsAgent(mcp_server=runtime)
+            agent = OpenHandsAgent.create(model=model, mcp_server=runtime)
             logger.info("Phase 2: Generating Problem...")
             problem_prompt = (
                 "You are now preparing the problem state for the student.\n"

@@ -3,12 +3,13 @@
 Uses RustCodingEnvironment for isolated Rust development testing.
 """
 
+from oai_utils.agent import AgentsSDKModel
 import pytest
 from pathlib import Path
 
 from agents.tracing import add_trace_processor
 
-from openhands_agent import OpenHandsAgent, AgentConfig
+from openhands_agent import OpenHandsAgent
 from openhands_agent.tracing import AgentContentPrinter
 from openhands_agent.runtime.rust_env import RustCodingEnvironment
 from tests.conftest import llm_judge
@@ -19,7 +20,7 @@ add_trace_processor(AgentContentPrinter())
 
 
 @pytest.mark.asyncio
-async def test_rust_project_creation(agent_config: AgentConfig, tmp_path: Path):
+async def test_rust_project_creation(model: AgentsSDKModel, tmp_path: Path):
     """Test that agent can create and build a Rust project."""
     workspace = tmp_path / "rust_workspace"
     cache_dir = tmp_path / "sccache"
@@ -30,7 +31,7 @@ async def test_rust_project_creation(agent_config: AgentConfig, tmp_path: Path):
         cache_dir=str(cache_dir),
         cargo_cache_dir=str(cargo_cache),
     ) as mcp_server:
-        agent = OpenHandsAgent(mcp_server=mcp_server, config=agent_config)
+        agent = OpenHandsAgent.create(model=model, mcp_server=mcp_server)
         task = """
         1. Create a new Rust project called 'hello_rust'
         2. Add a dependency on 'serde' in Cargo.toml
@@ -48,6 +49,7 @@ async def test_rust_project_creation(agent_config: AgentConfig, tmp_path: Path):
 
         # LLM-as-a-judge verification
         passed, explanation = await llm_judge(
+            model=model,
             mcp_server=mcp_server,
             task_description=task,
             agent_output=result.final_output,
@@ -62,7 +64,7 @@ async def test_rust_project_creation(agent_config: AgentConfig, tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_rust_compile_twice_for_cache(agent_config: AgentConfig, tmp_path: Path):
+async def test_rust_compile_twice_for_cache(model: AgentsSDKModel, tmp_path: Path):
     """Test that sccache caches compilations across builds."""
     workspace = tmp_path / "rust_workspace"
     cache_dir = tmp_path / "sccache"
@@ -73,7 +75,7 @@ async def test_rust_compile_twice_for_cache(agent_config: AgentConfig, tmp_path:
         cache_dir=str(cache_dir),
         cargo_cache_dir=str(cargo_cache),
     ) as mcp_server:
-        agent = OpenHandsAgent(mcp_server=mcp_server, config=agent_config)
+        agent = OpenHandsAgent.create(model=model, mcp_server=mcp_server)
         task = """
             1. Create a new Rust project called 'cache_test'
             2. Add serde dependency
@@ -86,6 +88,7 @@ async def test_rust_compile_twice_for_cache(agent_config: AgentConfig, tmp_path:
 
         # LLM-as-a-judge verification
         passed, explanation = await llm_judge(
+            model=model,
             mcp_server=mcp_server,
             task_description=task,
             agent_output=result.final_output,

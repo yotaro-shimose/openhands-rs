@@ -1,17 +1,17 @@
+from oai_utils.agent import AgentsSDKModel
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 from loguru import logger
 
-from openhands_agent.agent import AgentConfig, OpenHandsAgent
+from openhands_agent.agent import OpenHandsAgent
 from openhands_agent.exam.exam import CodingExam
 from openhands_agent.exam.repository import GitRepository
 from openhands_agent.runtime.rust_env import RustCodingEnvironment
 
 
-async def solve_exam(exam: CodingExam, config: Optional[AgentConfig] = None) -> Path:
+async def solve_exam(model: AgentsSDKModel, exam: CodingExam) -> Path:
     """
     Solves the given exam by running an agent in a temporary environment.
     Returns the path to the temporary workspace containing the solution.
@@ -43,7 +43,7 @@ async def solve_exam(exam: CodingExam, config: Optional[AgentConfig] = None) -> 
         # Initialize Runtime
         async with RustCodingEnvironment(workspace_dir=work_dir) as runtime:
             # Use provided config or default
-            agent = OpenHandsAgent(mcp_server=runtime, config=config)
+            agent = OpenHandsAgent.create(model=model, mcp_server=runtime)
 
             # Construct Prompt
             prompt = (
@@ -54,13 +54,7 @@ async def solve_exam(exam: CodingExam, config: Optional[AgentConfig] = None) -> 
             )
 
             logger.info("Starting agent to solve exam...")
-            # We assume a reasonable max_turns if not specified in config
-            if config and config.max_iterations:
-                max_turns = config.max_iterations
-            else:
-                max_turns = 30
-
-            await agent.run(prompt, max_turns=max_turns)
+            await agent.run(prompt, max_turns=30)
 
         return work_dir
 
@@ -70,7 +64,7 @@ async def solve_exam(exam: CodingExam, config: Optional[AgentConfig] = None) -> 
 
 
 async def evaluate_exam(
-    exam: CodingExam, workspace_path: Path, config: Optional[AgentConfig] = None
+    model: AgentsSDKModel, exam: CodingExam, workspace_path: Path
 ) -> str:
     """
     Evaluates a solution in the given workspace against the exam rubric.
@@ -82,7 +76,7 @@ async def evaluate_exam(
         # Initialize Runtime on the existing solution workspace
         async with RustCodingEnvironment(workspace_dir=workspace_path) as runtime:
             # Use provided config or default
-            agent = OpenHandsAgent(mcp_server=runtime, config=config)
+            agent = OpenHandsAgent.create(model=model, mcp_server=runtime)
 
             # Construct Prompt
             prompt = (
