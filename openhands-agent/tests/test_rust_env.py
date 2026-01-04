@@ -7,16 +7,10 @@ from oai_utils.agent import AgentsSDKModel
 import pytest
 from pathlib import Path
 
-from agents.tracing import add_trace_processor
 
 from openhands_agent import OpenHandsAgent
-from openhands_agent.tracing import AgentContentPrinter
 from openhands_agent.runtime.rust_env import RustCodingEnvironment
 from tests.conftest import llm_judge
-
-
-# Enable tracing for test visibility
-add_trace_processor(AgentContentPrinter())
 
 
 @pytest.mark.asyncio

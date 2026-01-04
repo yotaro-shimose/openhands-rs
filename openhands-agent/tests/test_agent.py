@@ -8,15 +8,9 @@ from openhands_agent.runtime.docker_runtime import DockerRuntime
 import pytest
 from pathlib import Path
 
-from agents.tracing import add_trace_processor
 
 from openhands_agent import OpenHandsAgent
-from openhands_agent.tracing import AgentContentPrinter
 from tests.conftest import llm_judge
-
-
-# Enable tracing for test visibility
-add_trace_processor(AgentContentPrinter())
 
 
 @pytest.mark.asyncio

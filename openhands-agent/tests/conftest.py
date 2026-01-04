@@ -4,20 +4,24 @@ Provides reusable fixtures for runtimes and configurations.
 Uses LLM-as-a-judge pattern for testing (no mocks).
 """
 
-from oai_utils.agent import AgentsSDKModel
-from agents.extensions.models.litellm_model import LitellmModel
-import pytest
-import pytest_asyncio
+import os
 from pathlib import Path
 
-from dotenv import load_dotenv
+import pytest
+import pytest_asyncio
+from agents.extensions.models.litellm_model import LitellmModel
 from agents.mcp import MCPServerStreamableHttp
-
+from agents.tracing import add_trace_processor
+from dotenv import load_dotenv
+from oai_utils.agent import AgentsSDKModel
 
 from openhands_agent import OpenHandsAgent
 from openhands_agent.runtime import LocalRuntime
 from openhands_agent.runtime.docker_runtime import DockerRuntime
-import os
+from openhands_agent.tracing import AgentContentPrinter
+
+# Enable tracing for test visibility
+add_trace_processor(AgentContentPrinter())
 
 # Load environment variables (OPENAI_API_KEY, etc.)
 load_dotenv()
