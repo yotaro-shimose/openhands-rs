@@ -1,4 +1,3 @@
-use rmcp::model::ErrorCode;
 use rmcp::schemars;
 use rmcp::ErrorData as McpError;
 use serde::{Deserialize, Serialize};
@@ -23,12 +22,10 @@ pub fn run_task_tracker(args: &TaskTrackerArgs, workspace_dir: &Path) -> Result<
 
     // Load existing tasks
     let mut tasks: Vec<TaskItem> = if tasks_file.exists() {
-        let content = fs::read_to_string(&tasks_file).map_err(|e| McpError {
-            code: ErrorCode(-32603),
-            message: format!("Failed to read tasks.json: {}", e).into(),
-            data: None,
-        })?;
-        serde_json::from_str(&content).unwrap_or_default()
+        match fs::read_to_string(&tasks_file) {
+            Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+            Err(e) => return Ok(format!("Error: Failed to read tasks.json: {}", e)),
+        }
     } else {
         Vec::new()
     };
@@ -41,16 +38,13 @@ pub fn run_task_tracker(args: &TaskTrackerArgs, workspace_dir: &Path) -> Result<
             // Update tasks
             if let Some(new_tasks) = &args.task_list {
                 tasks = new_tasks.clone();
-                let content = serde_json::to_string_pretty(&tasks).map_err(|e| McpError {
-                    code: ErrorCode(-32603),
-                    message: format!("Failed to serialize tasks: {}", e).into(),
-                    data: None,
-                })?;
-                fs::write(&tasks_file, content).map_err(|e| McpError {
-                    code: ErrorCode(-32603),
-                    message: format!("Failed to write tasks.json: {}", e).into(),
-                    data: None,
-                })?;
+                let content = match serde_json::to_string_pretty(&tasks) {
+                    Ok(c) => c,
+                    Err(e) => return Ok(format!("Error: Failed to serialize tasks: {}", e)),
+                };
+                if let Err(e) = fs::write(&tasks_file, content) {
+                    return Ok(format!("Error: Failed to write tasks.json: {}", e));
+                }
             }
         }
         _ => {
@@ -122,5 +116,16 @@ mod tests {
         };
         let result_view = run_task_tracker(&args_view, dir.path()).unwrap();
         assert_eq!(result_plan, result_view);
+    }
+
+    #[test]
+    fn test_task_tracker_unknown_command_returns_ok() {
+        let dir = tempdir().unwrap();
+        let args = TaskTrackerArgs {
+            command: "unknown".to_string(),
+            task_list: None,
+        };
+        let result = run_task_tracker(&args, dir.path()).unwrap();
+        assert!(result.contains("Error: Unknown command"));
     }
 }

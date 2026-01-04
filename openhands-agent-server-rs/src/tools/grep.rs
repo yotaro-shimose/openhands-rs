@@ -1,5 +1,4 @@
 use regex::Regex;
-use rmcp::model::ErrorCode;
 use rmcp::schemars;
 use rmcp::ErrorData as McpError;
 use serde::Deserialize;
@@ -27,19 +26,27 @@ pub fn run_grep(args: &GrepArgs, workspace_dir: &Path) -> Result<String, McpErro
         ));
     }
 
-    let re = Regex::new(&args.pattern).map_err(|e| McpError {
-        code: ErrorCode(-32602),
-        message: format!("Invalid regex: {}", e).into(),
-        data: None,
-    })?;
+    let re = match Regex::new(&args.pattern) {
+        Ok(r) => r,
+        Err(e) => {
+            return Ok(format!(
+                "Error: Invalid regex pattern '{}': {}",
+                args.pattern, e
+            ))
+        }
+    };
 
     let include_pattern = args.include.as_deref();
     let include_glob = if let Some(p) = include_pattern {
-        Some(glob::Pattern::new(p).map_err(|e| McpError {
-            code: ErrorCode(-32602),
-            message: format!("Invalid include glob: {}", e).into(),
-            data: None,
-        })?)
+        match glob::Pattern::new(p) {
+            Ok(pat) => Some(pat),
+            Err(e) => {
+                return Ok(format!(
+                    "Error: Invalid include glob pattern '{}': {}",
+                    p, e
+                ))
+            }
+        }
     } else {
         None
     };
@@ -182,5 +189,29 @@ mod tests {
         assert!(result.contains("Found 1 file(s)"));
         assert!(!result.contains("test.txt"));
         assert!(result.contains("test.rs"));
+    }
+
+    #[test]
+    fn test_grep_invalid_regex_returns_ok() {
+        let dir = tempdir().unwrap();
+        let args = GrepArgs {
+            pattern: "[".to_string(), // Invalid regex
+            path: None,
+            include: None,
+        };
+        let result = run_grep(&args, dir.path()).unwrap();
+        assert!(result.contains("Error: Invalid regex pattern"));
+    }
+
+    #[test]
+    fn test_grep_invalid_include_glob_returns_ok() {
+        let dir = tempdir().unwrap();
+        let args = GrepArgs {
+            pattern: "test".to_string(),
+            path: None,
+            include: Some("[".to_string()), // Invalid glob
+        };
+        let result = run_grep(&args, dir.path()).unwrap();
+        assert!(result.contains("Error: Invalid include glob pattern"));
     }
 }

@@ -1,4 +1,3 @@
-use rmcp::model::ErrorCode;
 use rmcp::schemars;
 use rmcp::ErrorData as McpError;
 use serde::Deserialize;
@@ -170,11 +169,16 @@ pub fn run_list_files(args: &ListFilesArgs, workspace_dir: &Path) -> Result<Stri
             }
         }
     } else {
-        let read_dir = fs::read_dir(&path).map_err(|e| McpError {
-            code: ErrorCode(-32603),
-            message: format!("Error listing directory: {}", e).into(),
-            data: None,
-        })?;
+        let read_dir = match fs::read_dir(&path) {
+            Ok(rd) => rd,
+            Err(e) => {
+                return Ok(format!(
+                    "Error: Failed to list directory {}: {}",
+                    path.display(),
+                    e
+                ))
+            }
+        };
         for entry in read_dir.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
             let type_str = if entry.path().is_dir() { "dir" } else { "file" };

@@ -83,11 +83,11 @@ pub async fn run_file_editor(
                             formatted_paths.join("\n")
                         ))
                     }
-                    Err(e) => Err(McpError {
-                        code: ErrorCode(-32603),
-                        message: format!("Failed to list directory: {}", e).into(),
-                        data: None,
-                    }),
+                    Err(e) => Ok(format!(
+                        "Error: Failed to list directory {}: {}",
+                        path.display(),
+                        e
+                    )),
                 }
             } else {
                 match fs::read_to_string(&path) {
@@ -127,11 +127,11 @@ pub async fn run_file_editor(
                             start_line,
                         ))
                     }
-                    Err(e) => Err(McpError {
-                        code: ErrorCode(-32603),
-                        message: format!("Failed to read file: {}", e).into(),
-                        data: None,
-                    }),
+                    Err(e) => Ok(format!(
+                        "Error: Failed to read file {}: {}",
+                        path.display(),
+                        e
+                    )),
                 }
             }
         }
@@ -139,44 +139,54 @@ pub async fn run_file_editor(
             if path.exists() {
                 return Ok(format!("Error: File already exists at: {}. Cannot overwrite files using command `create`. Use `str_replace` to edit the file instead.", path.display()));
             }
-            let content = args.file_text.clone().ok_or_else(|| McpError {
-                code: ErrorCode(-32602),
-                message: "Missing file_text".into(),
-                data: None,
-            })?;
+            let content = match args.file_text.clone() {
+                Some(c) => c,
+                None => {
+                    return Ok("Error: Missing file_text parameter for create command.".to_string())
+                }
+            };
             // Create parent directories if they don't exist
             if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).map_err(|e| McpError {
-                    code: ErrorCode(-32603),
-                    message: format!("Failed to create parent directories: {}", e).into(),
-                    data: None,
-                })?;
+                if let Err(e) = fs::create_dir_all(parent) {
+                    return Ok(format!(
+                        "Error: Failed to create parent directories for {}: {}",
+                        path.display(),
+                        e
+                    ));
+                }
             }
-            fs::write(&path, &content).map_err(|e| McpError {
-                code: ErrorCode(-32603),
-                message: format!("Failed to write to {}: {}", path.display(), e).into(),
-                data: None,
-            })?;
+            if let Err(e) = fs::write(&path, &content) {
+                return Ok(format!(
+                    "Error: Failed to write to {}: {}",
+                    path.display(),
+                    e
+                ));
+            }
             Ok(format!("File created successfully at: {}", path.display()))
         }
         "str_replace" => {
             if !path.exists() {
-                return Err(McpError {
-                    code: ErrorCode(-32602),
-                    message: format!("The path {} does not exist.", path.display()).into(),
-                    data: None,
-                });
+                return Ok(format!(
+                    "Error: The path {} does not exist. Please check the file path.",
+                    path.display()
+                ));
             }
-            let old_str = args.old_str.clone().ok_or_else(|| McpError {
-                code: ErrorCode(-32602),
-                message: "Missing old_str".into(),
-                data: None,
-            })?;
-            let new_str = args.new_str.clone().ok_or_else(|| McpError {
-                code: ErrorCode(-32602),
-                message: "Missing new_str".into(),
-                data: None,
-            })?;
+            let old_str = match args.old_str.clone() {
+                Some(s) => s,
+                None => {
+                    return Ok(
+                        "Error: Missing old_str parameter for str_replace command.".to_string()
+                    )
+                }
+            };
+            let new_str = match args.new_str.clone() {
+                Some(s) => s,
+                None => {
+                    return Ok(
+                        "Error: Missing new_str parameter for str_replace command.".to_string()
+                    )
+                }
+            };
 
             if old_str == new_str {
                 return Ok(
@@ -260,26 +270,19 @@ pub async fn run_file_editor(
             ))
         }
         "insert" => {
-            let insert_line = args.insert_line.ok_or_else(|| McpError {
-                code: ErrorCode(-32602),
-                message: "Missing insert_line".into(),
-                data: None,
-            })?;
-            let text_to_insert =
-                args.new_str
-                    .clone()
-                    .or(args.file_text.clone())
-                    .ok_or_else(|| McpError {
-                        code: ErrorCode(-32602),
-                        message: "Missing new_str (or file_text)".into(),
-                        data: None,
-                    })?;
+            let insert_line = match args.insert_line {
+                Some(l) => l,
+                None => return Ok("Error: Missing insert_line parameter for insert command.".to_string()),
+            };
+            let text_to_insert = match args.new_str.clone().or(args.file_text.clone()) {
+                Some(t) => t,
+                None => return Ok("Error: Missing new_str (or file_text) for insert command.".to_string()),
+            };
 
-            let content = fs::read_to_string(&path).map_err(|e| McpError {
-                code: ErrorCode(-32603),
-                message: format!("Failed to read file: {}", e).into(),
-                data: None,
-            })?;
+            let content = match fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(e) => return Ok(format!("Error: Failed to read file {}: {}", path.display(), e)),
+            };
 
             // Save history
             {
@@ -294,15 +297,7 @@ pub async fn run_file_editor(
             let idx = (insert_line as usize).saturating_sub(1);
 
             if idx > lines.len() {
-                return Err(McpError {
-                    code: ErrorCode(-32602),
-                    message: format!(
-                        "It should be within the range of allowed values: [0, {}]",
-                        lines.len()
-                    )
-                    .into(),
-                    data: None,
-                });
+                return Ok(format!("Error: insert_line {} should be within the range of allowed values: [0, {}]", insert_line, lines.len()));
             }
 
             let inserted_lines_count = text_to_insert.lines().count();
@@ -314,11 +309,9 @@ pub async fn run_file_editor(
             }
 
             let new_content = lines.join("\n");
-            fs::write(&path, &new_content).map_err(|e| McpError {
-                code: ErrorCode(-32603),
-                message: format!("Failed to write file: {}", e).into(),
-                data: None,
-            })?;
+            if let Err(e) = fs::write(&path, &new_content) {
+                return Ok(format!("Error: Failed to write file {}: {}", path.display(), e));
+            }
 
             // Snippet
             let start_line = (insert_line as usize).saturating_sub(SNIPPET_CONTEXT_WINDOW);
@@ -343,11 +336,9 @@ pub async fn run_file_editor(
             let mut history = editor_history.lock().await;
             if let Some(versions) = history.get_mut(&path) {
                 if let Some(prev_content) = versions.pop() {
-                    fs::write(&path, &prev_content).map_err(|e| McpError {
-                        code: ErrorCode(-32603),
-                        message: format!("Failed to restore file: {}", e).into(),
-                        data: None,
-                    })?;
+                    if let Err(e) = fs::write(&path, &prev_content) {
+                        return Ok(format!("Error: Failed to restore file {}: {}", path.display(), e));
+                    }
                     return Ok(format!(
                         "Last edit to {} undone successfully. {}",
                         path.display(),
@@ -355,17 +346,9 @@ pub async fn run_file_editor(
                     ));
                 }
             }
-            Err(McpError {
-                code: ErrorCode(-32602),
-                message: format!("No edit history found for {}", path.display()).into(),
-                data: None,
-            })
+            Ok(format!("Error: No edit history found for {}", path.display()))
         }
-        _ => Err(McpError {
-            code: ErrorCode(-32602),
-            message: format!("Unrecognized command {}.", args.command).into(),
-            data: None,
-        }),
+        _ => Ok(format!("Error: Unrecognized command '{}'. Use view, create, str_replace, insert, or undo_edit.", args.command)),
     }
 }
 
@@ -539,5 +522,76 @@ mod tests {
         let result = run_file_editor(&args, dir.path(), &history).await.unwrap();
         assert!(result.contains("Error:"));
         assert!(result.contains("Multiple occurrences"));
+    }
+
+    #[tokio::test]
+    async fn test_file_editor_unknown_command_returns_ok() {
+        let dir = tempdir().unwrap();
+        let history = Mutex::new(HashMap::new());
+        let args = FileEditorArgs {
+            command: "unknown".to_string(),
+            path: "test.txt".to_string(),
+            file_text: None,
+            view_range: None,
+            old_str: None,
+            new_str: None,
+            insert_line: None,
+        };
+        let result = run_file_editor(&args, dir.path(), &history).await.unwrap();
+        assert!(result.contains("Error: Unrecognized command"));
+    }
+
+    #[tokio::test]
+    async fn test_file_editor_missing_parameters_returns_ok() {
+        let dir = tempdir().unwrap();
+        let history = Mutex::new(HashMap::new());
+
+        // Missing file_text for create
+        let args_create = FileEditorArgs {
+            command: "create".to_string(),
+            path: "test.txt".to_string(),
+            file_text: None,
+            view_range: None,
+            old_str: None,
+            new_str: None,
+            insert_line: None,
+        };
+        let res_create = run_file_editor(&args_create, dir.path(), &history)
+            .await
+            .unwrap();
+        assert!(res_create.contains("Error: Missing file_text"));
+
+        // Create the file first so we can test other commands
+        fs::write(dir.path().join("test.txt"), "hello world").unwrap();
+
+        // Missing old_str for str_replace
+        let args_replace = FileEditorArgs {
+            command: "str_replace".to_string(),
+            path: "test.txt".to_string(),
+            old_str: None,
+            new_str: Some("new".to_string()),
+            file_text: None,
+            view_range: None,
+            insert_line: None,
+        };
+        let res_replace = run_file_editor(&args_replace, dir.path(), &history)
+            .await
+            .unwrap();
+        assert!(res_replace.contains("Error: Missing old_str"));
+
+        // Missing insert_line for insert
+        let args_insert = FileEditorArgs {
+            command: "insert".to_string(),
+            path: "test.txt".to_string(),
+            insert_line: None,
+            new_str: Some("new".to_string()),
+            file_text: None,
+            view_range: None,
+            old_str: None,
+        };
+        let res_insert = run_file_editor(&args_insert, dir.path(), &history)
+            .await
+            .unwrap();
+        assert!(res_insert.contains("Error: Missing insert_line"));
     }
 }
