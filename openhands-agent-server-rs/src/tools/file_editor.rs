@@ -164,6 +164,14 @@ pub async fn run_file_editor(
                 message: "Missing file_text".into(),
                 data: None,
             })?;
+            // Create parent directories if they don't exist
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).map_err(|e| McpError {
+                    code: ErrorCode(-32603),
+                    message: format!("Failed to create parent directories: {}", e).into(),
+                    data: None,
+                })?;
+            }
             fs::write(&path, &content).map_err(|e| McpError {
                 code: ErrorCode(-32603),
                 message: format!("Failed to write to {}: {}", path.display(), e).into(),

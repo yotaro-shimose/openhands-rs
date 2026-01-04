@@ -22,9 +22,10 @@ async def test_create_file(
     docker_runtime, temp_workspace: Path, agent_config: AgentConfig
 ):
     """Test that agent can create a simple file."""
-    async with OpenHandsAgent(runtime=docker_runtime, config=agent_config) as agent:
-        task = "Create a Python file called 'hello.py' that prints 'Hello, World!'"
-        result = await agent.run(task)
+    async with docker_runtime as mcp_server:
+        async with OpenHandsAgent(mcp_server=mcp_server, config=agent_config) as agent:
+            task = "Create a Python file called 'hello.py' that prints 'Hello, World!'"
+            result = await agent.run(task)
 
         # Verify file exists on host
         hello_file = temp_workspace / "hello.py"
@@ -32,6 +33,7 @@ async def test_create_file(
 
         # LLM-as-a-judge verification
         passed, explanation = await llm_judge(
+            mcp_server=mcp_server,
             task_description=task,
             agent_output=result.final_output,
             criteria=[
@@ -47,12 +49,13 @@ async def test_run_script(
     docker_runtime, temp_workspace: Path, agent_config: AgentConfig
 ):
     """Test that agent can create and execute a script."""
-    async with OpenHandsAgent(runtime=docker_runtime, config=agent_config) as agent:
-        task = """
-        1. Create a Python file called 'fib.py' with a function that returns the nth Fibonacci number
-        2. Run the script to print fib(10)
-        """
-        result = await agent.run(task)
+    async with docker_runtime as mcp_server:
+        async with OpenHandsAgent(mcp_server=mcp_server, config=agent_config) as agent:
+            task = """
+            1. Create a Python file called 'fib.py' with a function that returns the nth Fibonacci number
+            2. Run the script to print fib(10)
+            """
+            result = await agent.run(task)
 
         # Verify file exists
         fib_file = temp_workspace / "fib.py"
@@ -60,6 +63,7 @@ async def test_run_script(
 
         # LLM-as-a-judge verification
         passed, explanation = await llm_judge(
+            mcp_server=mcp_server,
             task_description=task,
             agent_output=result.final_output,
             criteria=[
@@ -79,12 +83,10 @@ async def test_edit_file(
     # Pre-create a file
     test_file = temp_workspace / "greeting.py"
     test_file.write_text('message = "Hello"\nprint(message)')
-
-    async with OpenHandsAgent(runtime=docker_runtime, config=agent_config) as agent:
-        task = (
-            "Edit greeting.py to change the message from 'Hello' to 'Hello, OpenHands!'"
-        )
-        result = await agent.run(task)
+    async with docker_runtime as mcp_server:
+        async with OpenHandsAgent(mcp_server=mcp_server, config=agent_config) as agent:
+            task = "Edit greeting.py to change the message from 'Hello' to 'Hello, OpenHands!'"
+            result = await agent.run(task)
 
         # Verify file was edited
         content = test_file.read_text()
@@ -94,6 +96,7 @@ async def test_edit_file(
 
         # LLM-as-a-judge verification
         passed, explanation = await llm_judge(
+            mcp_server=mcp_server,
             task_description=task,
             agent_output=result.final_output,
             criteria=[

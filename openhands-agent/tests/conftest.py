@@ -7,19 +7,18 @@ Uses LLM-as-a-judge pattern for testing (no mocks).
 import os
 import pytest
 import pytest_asyncio
-import tempfile
 from pathlib import Path
 
 from dotenv import load_dotenv
+from agents.mcp import MCPServerStreamableHttp
 
-# Load environment variables (OPENAI_API_KEY, etc.)
-load_dotenv()
-
-from agents import Agent, Runner
 
 from openhands_agent import OpenHandsAgent, AgentConfig
 from openhands_agent.runtime import LocalRuntime
 from docker_runtime import DockerRuntime
+
+# Load environment variables (OPENAI_API_KEY, etc.)
+load_dotenv()
 
 
 @pytest.fixture
@@ -54,57 +53,58 @@ async def local_runtime(agent_config: AgentConfig):
 
 
 async def llm_judge(
+    mcp_server: MCPServerStreamableHttp,
     task_description: str,
     agent_output: str,
     criteria: list[str],
-    model: str = "gpt-4o-mini",
+    config: AgentConfig | None = None,
 ) -> tuple[bool, str]:
-    """Use LLM-as-a-judge to evaluate agent output.
+    """Use another OpenHandsAgent as judge to evaluate agent output.
+
+    The judge agent has access to the same workspace via MCP server,
+    allowing it to inspect files and verify task completion.
 
     Args:
+        mcp_server: MCP server for workspace access
         task_description: What the agent was asked to do
         agent_output: The agent's final output
         criteria: List of success criteria to check
-        model: Model to use for judging
+        config: Agent config (defaults to env-based config with gpt-4o-mini)
 
     Returns:
         Tuple of (passed: bool, explanation: str)
     """
-    from openai import OpenAI
-
-    client = OpenAI()
+    judge_config = config or AgentConfig(
+        mcp_url="",  # Not used, we pass mcp_server directly
+        model="gpt-4o-mini",
+        timeout=30,
+    )
 
     criteria_text = "\n".join(f"- {c}" for c in criteria)
 
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {
-                "role": "system",
-                "content": """You are a test evaluator. Given a task and agent output,
-determine if the agent successfully completed the task based on the criteria.
+    judge_task = f"""You are a test evaluator. Evaluate if the agent successfully completed its task.
 
-Respond in this format:
-PASSED: yes/no
-EXPLANATION: <brief explanation>""",
-            },
-            {
-                "role": "user",
-                "content": f"""Task: {task_description}
+TASK GIVEN TO AGENT:
+{task_description}
 
-Success Criteria:
+SUCCESS CRITERIA:
 {criteria_text}
 
-Agent Output:
+AGENT'S OUTPUT:
 {agent_output}
 
-Did the agent successfully complete the task?""",
-            },
-        ],
-        temperature=0,
-    )
+INSTRUCTIONS:
+1. Use the file tools (read_file, list_files) to verify the workspace state if needed
+2. Check if the criteria are met based on the agent output and workspace state
+3. Respond with your evaluation in this exact format:
 
-    result = response.choices[0].message.content or ""
-    passed = "PASSED: yes" in result.lower() or "passed: yes" in result.lower()
+PASSED: yes/no
+EXPLANATION: <brief explanation of your findings>"""
 
-    return passed, result
+    async with OpenHandsAgent(mcp_server=mcp_server, config=judge_config) as judge:
+        result = await judge.run(judge_task)
+
+    output = result.final_output or ""
+    passed = "passed: yes" in output.lower()
+
+    return passed, output

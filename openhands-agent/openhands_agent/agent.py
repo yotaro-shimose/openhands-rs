@@ -37,7 +37,7 @@ class OpenHandsAgent:
 
     def __init__(
         self,
-        runtime: MCPServerStreamableHttp,
+        mcp_server: MCPServerStreamableHttp,
         config: AgentConfig | None = None,
     ):
         """Initialize the agent with a runtime.
@@ -47,7 +47,7 @@ class OpenHandsAgent:
             config: Agent configuration. If None, loads from environment.
         """
         self.config = config or AgentConfig.from_env()
-        self._mcp_server = runtime
+        self._mcp_server = mcp_server
         self._agent: Agent | None = None
 
     async def __aenter__(self) -> "OpenHandsAgent":
@@ -86,7 +86,7 @@ class OpenHandsAgent:
 
 async def run_agent(
     task: str,
-    runtime: MCPServerStreamableHttp | None = None,
+    mcp_server: MCPServerStreamableHttp | None = None,
     config: AgentConfig | None = None,
 ) -> RunResult:
     """Convenience function to run a task with the OpenHands agent.
@@ -110,8 +110,10 @@ async def run_agent(
             result = await run_agent("Fix the bug", runtime=runtime)
             print(result.final_output)
     """
-    if runtime is None:
-        raise ValueError("runtime is required. Use LocalRuntime() or DockerRuntime().")
+    if mcp_server is None:
+        raise ValueError(
+            "mcp_server is required. Use LocalRuntime() or DockerRuntime()."
+        )
 
-    async with OpenHandsAgent(runtime=runtime, config=config) as agent:
+    async with OpenHandsAgent(mcp_server=mcp_server, config=config) as agent:
         return await agent.run(task)

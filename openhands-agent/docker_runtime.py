@@ -114,14 +114,17 @@ class DockerRuntime(Runtime):
         cmd.append(self.image_name)
 
         # 3. Start container
+        print(f"🐳 Running: {' '.join(cmd)}")
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
         stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
+            print(f"❌ Container creation failed: {stderr.decode()}")
             raise RuntimeError(f"Failed to start Docker container: {stderr.decode()}")
 
         self._container_id = stdout.decode().strip()
+        print(f"✅ Container created successfully (ID: {self._container_id[:12]})")
 
         # If host_port was not specified, find what Docker assigned
         if not self.host_port:

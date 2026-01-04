@@ -73,6 +73,7 @@ EXPOSE 3000
 # Set environment variables
 ENV RUST_LOG=info
 ENV PORT=3000
+ENV WORKSPACE_DIR=/workspace
 ENV RUSTC_WRAPPER=/usr/local/bin/sccache
 ENV SCCACHE_DIR=/var/cache/sccache
 ENV CARGO_INCREMENTAL=0

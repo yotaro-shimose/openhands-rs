@@ -29,8 +29,8 @@ async def test_rust_project_creation(agent_config: AgentConfig, tmp_path: Path):
         workspace_dir=str(workspace),
         cache_dir=str(cache_dir),
         cargo_cache_dir=str(cargo_cache),
-    ) as runtime:
-        async with OpenHandsAgent(runtime=runtime, config=agent_config) as agent:
+    ) as mcp_server:
+        async with OpenHandsAgent(mcp_server=mcp_server, config=agent_config) as agent:
             task = """
             1. Create a new Rust project called 'hello_rust'
             2. Add a dependency on 'serde' in Cargo.toml
@@ -48,6 +48,7 @@ async def test_rust_project_creation(agent_config: AgentConfig, tmp_path: Path):
 
             # LLM-as-a-judge verification
             passed, explanation = await llm_judge(
+                mcp_server=mcp_server,
                 task_description=task,
                 agent_output=result.final_output,
                 criteria=[
@@ -71,8 +72,8 @@ async def test_rust_compile_twice_for_cache(agent_config: AgentConfig, tmp_path:
         workspace_dir=str(workspace),
         cache_dir=str(cache_dir),
         cargo_cache_dir=str(cargo_cache),
-    ) as runtime:
-        async with OpenHandsAgent(runtime=runtime, config=agent_config) as agent:
+    ) as mcp_server:
+        async with OpenHandsAgent(mcp_server=mcp_server, config=agent_config) as agent:
             task = """
             1. Create a new Rust project called 'cache_test'
             2. Add serde dependency
@@ -85,6 +86,7 @@ async def test_rust_compile_twice_for_cache(agent_config: AgentConfig, tmp_path:
 
             # LLM-as-a-judge verification
             passed, explanation = await llm_judge(
+                mcp_server=mcp_server,
                 task_description=task,
                 agent_output=result.final_output,
                 criteria=[
