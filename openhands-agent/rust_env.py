@@ -54,4 +54,16 @@ class RustCodingEnvironment(DockerRuntime):
     async def __aenter__(self) -> MCPServerStreamableHttp:
         """Starts the Rust coding environment."""
         print("🦀 Initializing Rust Coding Environment...")
+
+        # Ensure cache directories exist with proper permissions
+        # The Docker container runs as non-root user, so we need 777 permissions
+        for dir_path in [
+            self.cache_dir,
+            self.cargo_cache_dir,
+            self.cargo_cache_dir / "registry",
+            self.cargo_cache_dir / "git",
+        ]:
+            dir_path.mkdir(parents=True, exist_ok=True)
+            dir_path.chmod(0o777)
+
         return await super().__aenter__()

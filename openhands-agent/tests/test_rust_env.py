@@ -44,7 +44,7 @@ async def test_rust_project_creation(agent_config: AgentConfig, tmp_path: Path):
             assert project_dir.exists(), f"Expected {project_dir} to exist"
 
             cargo_toml = project_dir / "Cargo.toml"
-            assert cargo_toml.exists(), f"Expected Cargo.toml to exist"
+            assert cargo_toml.exists(), "Expected Cargo.toml to exist"
 
             # LLM-as-a-judge verification
             passed, explanation = await llm_judge(

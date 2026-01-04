@@ -1,5 +1,4 @@
 use glob::glob;
-use rmcp::model::ErrorCode;
 use rmcp::schemars;
 use rmcp::ErrorData as McpError;
 use serde::Deserialize;
@@ -33,11 +32,15 @@ pub fn run_glob(args: &GlobArgs, workspace_dir: &Path) -> Result<String, McpErro
 
     let mut matches = Vec::new();
     // glob returns Result<Paths, PatternError>
-    let paths = glob(&pattern_str).map_err(|e| McpError {
-        code: ErrorCode(-32602),
-        message: e.to_string().into(),
-        data: None,
-    })?;
+    let paths = match glob(&pattern_str) {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(format!(
+                "Error: Invalid glob pattern '{}': {}",
+                args.pattern, e
+            ))
+        }
+    };
 
     for entry in paths {
         match entry {
@@ -48,11 +51,7 @@ pub fn run_glob(args: &GlobArgs, workspace_dir: &Path) -> Result<String, McpErro
                 }
             }
             Err(e) => {
-                return Err(McpError {
-                    code: ErrorCode(-32603),
-                    message: e.to_string().into(),
-                    data: None,
-                })
+                return Ok(format!("Error while iterating glob matches: {}", e));
             }
         }
     }

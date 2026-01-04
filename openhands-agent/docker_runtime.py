@@ -174,6 +174,8 @@ class DockerRuntime(Runtime):
                 "timeout": 15,
             },
             cache_tools_list=False,
+            # Allow long-running commands (e.g., cargo build, rustup) up to 5 minutes
+            client_session_timeout_seconds=300,
         )
         return await self._mcp_server.__aenter__()
 

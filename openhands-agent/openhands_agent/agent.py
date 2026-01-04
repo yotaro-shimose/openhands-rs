@@ -66,7 +66,7 @@ class OpenHandsAgent:
         # Runtime handles MCP server cleanup, we just cleanup agent state
         self._agent = None
 
-    async def run(self, task: str) -> RunResult:
+    async def run(self, task: str, max_turns: int = 30) -> RunResult:
         """Run the agent with a task.
 
         Args:
@@ -81,7 +81,7 @@ class OpenHandsAgent:
         if not self._agent:
             raise RuntimeError("Agent not initialized. Use 'async with' context.")
 
-        return await Runner.run(self._agent, task)
+        return await Runner.run(self._agent, task, max_turns=max_turns)
 
 
 async def run_agent(

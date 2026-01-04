@@ -54,11 +54,10 @@ pub fn run_task_tracker(args: &TaskTrackerArgs, workspace_dir: &Path) -> Result<
             }
         }
         _ => {
-            return Err(McpError {
-                code: ErrorCode(-32602),
-                message: format!("Unknown command: {}", args.command).into(),
-                data: None,
-            })
+            return Ok(format!(
+                "Error: Unknown command '{}'. Use 'view' or 'plan'.",
+                args.command
+            ));
         }
     }
 

@@ -45,15 +45,10 @@ pub async fn run_file_editor(
     match args.command.as_str() {
         "view" => {
             if !path.exists() {
-                return Err(McpError {
-                    code: ErrorCode(-32602),
-                    message: format!(
-                        "The path {} does not exist. Please provide a valid path.",
-                        path.display()
-                    )
-                    .into(),
-                    data: None,
-                });
+                return Ok(format!(
+                    "Error: The path {} does not exist. Please provide a valid path.",
+                    path.display()
+                ));
             }
             if path.is_dir() {
                 let mut formatted_paths = Vec::new();
@@ -101,27 +96,16 @@ pub async fn run_file_editor(
                         let num_lines = lines.len();
                         let (start_line, end_line) = if let Some(range) = &args.view_range {
                             if range.len() != 2 {
-                                return Err(McpError {
-                                    code: ErrorCode(-32602),
-                                    message: "view_range should be a list of two integers.".into(),
-                                    data: None,
-                                });
+                                return Ok("Error: view_range should be a list of two integers."
+                                    .to_string());
                             }
                             let s = range[0] as usize;
                             let e = range[1] as usize;
                             if s < 1 || s > num_lines {
-                                return Err(McpError {
-                                    code: ErrorCode(-32602),
-                                    message: format!("Its first element `{}` should be within the range of lines of the file: [1, {}].", s, num_lines).into(),
-                                    data: None,
-                                 });
+                                return Ok(format!("Error: Its first element `{}` should be within the range of lines of the file: [1, {}].", s, num_lines));
                             }
                             if e < s {
-                                return Err(McpError {
-                                    code: ErrorCode(-32602),
-                                    message: format!("Its second element `{}` should be greater than or equal to the first element `{}`.", e, s).into(),
-                                    data: None,
-                                });
+                                return Ok(format!("Error: Its second element `{}` should be greater than or equal to the first element `{}`.", e, s));
                             }
                             (s, e)
                         } else {
@@ -153,11 +137,7 @@ pub async fn run_file_editor(
         }
         "create" => {
             if path.exists() {
-                return Err(McpError {
-                    code: ErrorCode(-32602),
-                    message: format!("File already exists at: {}. Cannot overwrite files using command `create`.", path.display()).into(),
-                    data: None,
-                });
+                return Ok(format!("Error: File already exists at: {}. Cannot overwrite files using command `create`. Use `str_replace` to edit the file instead.", path.display()));
             }
             let content = args.file_text.clone().ok_or_else(|| McpError {
                 code: ErrorCode(-32602),
@@ -199,13 +179,9 @@ pub async fn run_file_editor(
             })?;
 
             if old_str == new_str {
-                return Err(McpError {
-                    code: ErrorCode(-32602),
-                    message:
-                        "No replacement was performed. `new_str` and `old_str` must be different."
-                            .into(),
-                    data: None,
-                });
+                return Ok(
+                    "Error: No replacement was performed. `new_str` and `old_str` must be different. Please provide different values.".to_string()
+                );
             }
 
             let content = fs::read_to_string(&path).map_err(|e| McpError {
@@ -218,28 +194,18 @@ pub async fn run_file_editor(
             let occurrences: Vec<_> = content.match_indices(&old_str).collect();
 
             if occurrences.is_empty() {
-                // Try trimming (simplified version of python logic)
-                return Err(McpError {
-                    code: ErrorCode(-32602),
-                    message: format!(
-                        "No replacement was performed, old_str `{}` did not appear verbatim in {}.",
-                        old_str,
-                        path.display()
-                    )
-                    .into(),
-                    data: None,
-                });
+                return Ok(format!(
+                    "Error: No replacement was performed, old_str `{}` did not appear verbatim in {}. Please check the file content and try again with the correct string.",
+                    old_str,
+                    path.display()
+                ));
             }
             if occurrences.len() > 1 {
                 let line_numbers: Vec<usize> = occurrences
                     .iter()
                     .map(|(idx, _)| content[..*idx].chars().filter(|&c| c == '\n').count() + 1)
                     .collect();
-                return Err(McpError {
-                    code: ErrorCode(-32602),
-                    message: format!("No replacement was performed. Multiple occurrences of old_str `{}` in lines {:?}. Please ensure it is unique.", old_str, line_numbers).into(),
-                    data: None,
-                });
+                return Ok(format!("Error: No replacement was performed. Multiple occurrences of old_str `{}` in lines {:?}. Please provide more context to make the match unique.", old_str, line_numbers));
             }
 
             let (idx, matched_text) = occurrences[0];
@@ -493,5 +459,85 @@ mod tests {
         // Verify undo
         let content = fs::read_to_string(&file_path).unwrap();
         assert_eq!(content, "hello world");
+    }
+
+    // Error handling tests - verify errors return Ok with error message
+
+    #[tokio::test]
+    async fn test_view_file_not_found_returns_ok() {
+        let dir = tempdir().unwrap();
+        let history = Mutex::new(HashMap::new());
+        let args = FileEditorArgs {
+            command: "view".to_string(),
+            path: "nonexistent.txt".to_string(),
+            file_text: None,
+            view_range: None,
+            old_str: None,
+            new_str: None,
+            insert_line: None,
+        };
+        let result = run_file_editor(&args, dir.path(), &history).await.unwrap();
+        assert!(result.contains("Error:"));
+        assert!(result.contains("does not exist"));
+    }
+
+    #[tokio::test]
+    async fn test_create_file_exists_returns_ok() {
+        let dir = tempdir().unwrap();
+        let history = Mutex::new(HashMap::new());
+        fs::write(dir.path().join("test.txt"), "existing content").unwrap();
+
+        let args = FileEditorArgs {
+            command: "create".to_string(),
+            path: "test.txt".to_string(),
+            file_text: Some("new content".to_string()),
+            view_range: None,
+            old_str: None,
+            new_str: None,
+            insert_line: None,
+        };
+        let result = run_file_editor(&args, dir.path(), &history).await.unwrap();
+        assert!(result.contains("Error:"));
+        assert!(result.contains("already exists"));
+    }
+
+    #[tokio::test]
+    async fn test_str_replace_not_found_returns_ok() {
+        let dir = tempdir().unwrap();
+        let history = Mutex::new(HashMap::new());
+        fs::write(dir.path().join("test.txt"), "hello world").unwrap();
+
+        let args = FileEditorArgs {
+            command: "str_replace".to_string(),
+            path: "test.txt".to_string(),
+            old_str: Some("nonexistent".to_string()),
+            new_str: Some("replacement".to_string()),
+            file_text: None,
+            view_range: None,
+            insert_line: None,
+        };
+        let result = run_file_editor(&args, dir.path(), &history).await.unwrap();
+        assert!(result.contains("Error:"));
+        assert!(result.contains("did not appear verbatim"));
+    }
+
+    #[tokio::test]
+    async fn test_str_replace_multiple_occurrences_returns_ok() {
+        let dir = tempdir().unwrap();
+        let history = Mutex::new(HashMap::new());
+        fs::write(dir.path().join("test.txt"), "hello hello hello").unwrap();
+
+        let args = FileEditorArgs {
+            command: "str_replace".to_string(),
+            path: "test.txt".to_string(),
+            old_str: Some("hello".to_string()),
+            new_str: Some("world".to_string()),
+            file_text: None,
+            view_range: None,
+            insert_line: None,
+        };
+        let result = run_file_editor(&args, dir.path(), &history).await.unwrap();
+        assert!(result.contains("Error:"));
+        assert!(result.contains("Multiple occurrences"));
     }
 }

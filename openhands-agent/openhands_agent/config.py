@@ -15,7 +15,7 @@ class AgentConfig:
     """
 
     mcp_url: str = "http://localhost:3000/mcp"
-    model: str = "gpt-4o"
+    model: str = "gpt-5-mini"
     timeout: int = 30
 
     @classmethod
@@ -23,6 +23,6 @@ class AgentConfig:
         """Load configuration from environment variables."""
         return cls(
             mcp_url=os.getenv("MCP_URL", "http://localhost:3000/mcp"),
-            model=os.getenv("MODEL", "gpt-4o"),
+            model=os.getenv("MODEL", "gpt-5-mini"),
             timeout=int(os.getenv("TIMEOUT", "30")),
         )
