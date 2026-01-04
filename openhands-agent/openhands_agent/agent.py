@@ -1,7 +1,5 @@
 """OpenHands Agent implementation using openai-agents-sdk."""
 
-from typing import Any
-
 from agents import Agent, Runner
 from agents.mcp import MCPServerStreamableHttp
 from agents.run import RunResult
@@ -48,10 +46,6 @@ class OpenHandsAgent:
         """
         self.config = config or AgentConfig.from_env()
         self._mcp_server = mcp_server
-        self._agent: Agent | None = None
-
-    async def __aenter__(self) -> "OpenHandsAgent":
-        """Enter async context and initialize agent."""
         self._agent = Agent(
             name="OpenHands Agent",
             instructions=SYSTEM_PROMPT,
@@ -59,29 +53,57 @@ class OpenHandsAgent:
             model=self.config.model,
             model_settings=ModelSettings(tool_choice="auto"),
         )
-        return self
 
-    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """Exit async context."""
-        # Runtime handles MCP server cleanup, we just cleanup agent state
-        self._agent = None
-
-    async def run(self, task: str, max_turns: int = 30) -> RunResult:
+    async def run(
+        self,
+        input: str | list,
+        *,
+        context=None,
+        max_turns: int | None = None,
+        hooks=None,
+        run_config=None,
+        previous_response_id: str | None = None,
+        auto_previous_response_id: bool = False,
+        conversation_id: str | None = None,
+        session=None,
+    ) -> RunResult:
         """Run the agent with a task.
 
         Args:
-            task: The task to execute (natural language description)
+            input: The initial input to the agent.
+            context: The context to run the agent with.
+            max_turns: The maximum number of turns to run the agent for.
+            hooks: An object that receives callbacks on various lifecycle events.
+            run_config: Global settings for the entire agent run.
+            previous_response_id: The ID of the previous response.
+            auto_previous_response_id: Whether to automatically use the previous response ID.
+            conversation_id: The conversation ID.
+            session: A session for automatic conversation history management.
 
         Returns:
             RunResult containing the agent's output and execution details
-
-        Raises:
-            RuntimeError: If agent not initialized (not in async context)
         """
         if not self._agent:
-            raise RuntimeError("Agent not initialized. Use 'async with' context.")
+            raise RuntimeError("Agent not initialized.")
 
-        return await Runner.run(self._agent, task, max_turns=max_turns)
+        # Use configured max_iterations if max_turns is not provided
+        if max_turns is None and self.config.max_iterations:
+            max_turns = self.config.max_iterations
+        elif max_turns is None:
+            max_turns = 30
+
+        return await Runner.run(
+            self._agent,
+            input,
+            context=context,
+            max_turns=max_turns,
+            hooks=hooks,
+            run_config=run_config,
+            previous_response_id=previous_response_id,
+            auto_previous_response_id=auto_previous_response_id,
+            conversation_id=conversation_id,
+            session=session,
+        )
 
 
 async def run_agent(
@@ -89,31 +111,11 @@ async def run_agent(
     mcp_server: MCPServerStreamableHttp | None = None,
     config: AgentConfig | None = None,
 ) -> RunResult:
-    """Convenience function to run a task with the OpenHands agent.
-
-    Args:
-        task: The task to execute
-        runtime: MCP server from a Runtime. If None, uses LocalRuntime.
-        config: Optional agent configuration
-
-    Returns:
-        RunResult containing the agent's output
-
-    Example with explicit runtime:
-        async with DockerRuntime(image_name="openhands-agent-server-rs") as runtime:
-            result = await run_agent("Fix the bug", runtime=runtime)
-            print(result.final_output)
-
-    Example with default LocalRuntime:
-        # Requires MCP server running on localhost:3000
-        async with LocalRuntime() as runtime:
-            result = await run_agent("Fix the bug", runtime=runtime)
-            print(result.final_output)
-    """
+    """Convenience function to run a task with the OpenHands agent."""
     if mcp_server is None:
         raise ValueError(
             "mcp_server is required. Use LocalRuntime() or DockerRuntime()."
         )
 
-    async with OpenHandsAgent(mcp_server=mcp_server, config=config) as agent:
-        return await agent.run(task)
+    agent = OpenHandsAgent(mcp_server=mcp_server, config=config)
+    return await agent.run(task)

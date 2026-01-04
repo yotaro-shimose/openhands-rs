@@ -8,3 +8,5 @@ software-agent-sdk
 **/bash_events
 **/workspace
 **/alignment_test
+.sccache
+.vscode

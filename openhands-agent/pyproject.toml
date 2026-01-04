@@ -5,6 +5,7 @@ description = "OpenHands-quality coding agent using openai-agents-sdk"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "loguru>=0.7.3",
     "mcp>=1.25.0",
     "openai>=1.0.0",
     "openai-agents>=0.6.4",

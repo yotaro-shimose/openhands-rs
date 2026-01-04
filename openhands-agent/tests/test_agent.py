@@ -23,9 +23,9 @@ async def test_create_file(
 ):
     """Test that agent can create a simple file."""
     async with docker_runtime as mcp_server:
-        async with OpenHandsAgent(mcp_server=mcp_server, config=agent_config) as agent:
-            task = "Create a Python file called 'hello.py' that prints 'Hello, World!'"
-            result = await agent.run(task)
+        agent = OpenHandsAgent(mcp_server=mcp_server, config=agent_config)
+        task = "Create a Python file called 'hello.py' that prints 'Hello, World!'"
+        result = await agent.run(task)
 
         # Verify file exists on host
         hello_file = temp_workspace / "hello.py"
@@ -50,12 +50,12 @@ async def test_run_script(
 ):
     """Test that agent can create and execute a script."""
     async with docker_runtime as mcp_server:
-        async with OpenHandsAgent(mcp_server=mcp_server, config=agent_config) as agent:
-            task = """
-            1. Create a Python file called 'fib.py' with a function that returns the nth Fibonacci number
-            2. Run the script to print fib(10)
-            """
-            result = await agent.run(task)
+        agent = OpenHandsAgent(mcp_server=mcp_server, config=agent_config)
+        task = """
+        1. Create a Python file called 'fib.py' with a function that returns the nth Fibonacci number
+        2. Run the script to print fib(10)
+        """
+        result = await agent.run(task)
 
         # Verify file exists
         fib_file = temp_workspace / "fib.py"
@@ -84,9 +84,11 @@ async def test_edit_file(
     test_file = temp_workspace / "greeting.py"
     test_file.write_text('message = "Hello"\nprint(message)')
     async with docker_runtime as mcp_server:
-        async with OpenHandsAgent(mcp_server=mcp_server, config=agent_config) as agent:
-            task = "Edit greeting.py to change the message from 'Hello' to 'Hello, OpenHands!'"
-            result = await agent.run(task)
+        agent = OpenHandsAgent(mcp_server=mcp_server, config=agent_config)
+        task = (
+            "Edit greeting.py to change the message from 'Hello' to 'Hello, OpenHands!'"
+        )
+        result = await agent.run(task)
 
         # Verify file was edited
         content = test_file.read_text()

@@ -14,7 +14,7 @@ from agents.mcp import MCPServerStreamableHttp
 
 from openhands_agent import OpenHandsAgent, AgentConfig
 from openhands_agent.runtime import LocalRuntime
-from docker_runtime import DockerRuntime
+from openhands_agent.runtime.docker_runtime import DockerRuntime
 
 # Load environment variables (OPENAI_API_KEY, etc.)
 load_dotenv()
@@ -35,10 +35,11 @@ def temp_workspace(tmp_path: Path) -> Path:
 
 
 @pytest_asyncio.fixture
-async def docker_runtime(temp_workspace: Path):
-    """Create a DockerRuntime with temporary workspace."""
+async def docker_runtime(temp_workspace: Path, agent_config: AgentConfig):
+    """Create a DockerRuntime with temporary workspace and an OpenHandsAgent."""
     async with DockerRuntime(workspace_dir=str(temp_workspace)) as runtime:
-        yield runtime
+        agent = OpenHandsAgent(mcp_server=runtime, config=agent_config)
+        yield agent
 
 
 @pytest_asyncio.fixture
@@ -100,8 +101,8 @@ INSTRUCTIONS:
 PASSED: yes/no
 EXPLANATION: <brief explanation of your findings>"""
 
-    async with OpenHandsAgent(mcp_server=mcp_server, config=judge_config) as judge:
-        result = await judge.run(judge_task)
+    judge = OpenHandsAgent(mcp_server=mcp_server, config=judge_config)
+    result = await judge.run(judge_task)
 
     output = result.final_output or ""
     passed = "passed: yes" in output.lower()

@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import Dict, Optional, List
-from docker_runtime import DockerRuntime
+from openhands_agent.runtime.docker_runtime import DockerRuntime
 from agents.mcp import MCPServerStreamableHttp
 
 

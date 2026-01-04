@@ -17,6 +17,7 @@ class AgentConfig:
     mcp_url: str = "http://localhost:3000/mcp"
     model: str = "gpt-5-mini"
     timeout: int = 30
+    max_iterations: int = 30
 
     @classmethod
     def from_env(cls) -> "AgentConfig":
@@ -25,4 +26,5 @@ class AgentConfig:
             mcp_url=os.getenv("MCP_URL", "http://localhost:3000/mcp"),
             model=os.getenv("MODEL", "gpt-5-mini"),
             timeout=int(os.getenv("TIMEOUT", "30")),
+            max_iterations=int(os.getenv("MAX_ITERATIONS", "30")),
         )
