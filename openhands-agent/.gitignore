@@ -11,3 +11,6 @@ sccache_backup/
 docker_workspace/
 .cargo_cache
 projects
+templates/*
+!templates/rust_boilerplate/
+benchmarks/

@@ -1,0 +1,15 @@
+[package]
+name = "eval_project"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+numrs2 = "0.1.1"
+
+[[bin]]
+name = "solution"
+path = "solution/solution.rs"
+
+[[test]]
+name = "verify"
+path = "tests/verify.rs"

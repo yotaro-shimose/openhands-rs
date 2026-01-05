@@ -71,6 +71,30 @@ class GitRepository(BaseModel):
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to apply chmod -R 777: {e.stderr or e.stdout}")
 
+    def remove_non_primary(self) -> None:
+        """Remove main or master branches if they exist and are not the current branch."""
+        # Safety check: Ensure the local_dir is the same as the repository's top-level directory
+        toplevel = self.run_git(["rev-parse", "--show-toplevel"])
+        if Path(toplevel).resolve() != self.local_dir.resolve():
+            raise TemporalCodingRepositoryError(
+                f"Repository local_dir '{self.local_dir}' is not the top-level directory '{toplevel}'"
+            )
+
+        current_branch = self.run_git(["rev-parse", "--abbrev-ref", "HEAD"])
+        # List all local branches
+        branches = self.run_git(["branch", "--format=%(refname:short)"]).splitlines()
+        for branch in branches:
+            if branch in ["main", "master"]:
+                continue
+            if branch == current_branch:
+                logger.warning(
+                    f"Not removing '{branch}' because it is the current branch."
+                )
+                continue
+
+            logger.info(f"Removing branch '{branch}' from repository '{self.name}'.")
+            self.run_git(["branch", "-D", branch])
+
 
 class GitRepositoryDict(TypedDict):
     name: str

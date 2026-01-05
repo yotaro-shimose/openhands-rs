@@ -114,6 +114,7 @@ impl OpenHandsService {
         &self,
         Parameters(args): Parameters<ExecuteBashArgs>,
     ) -> Result<CallToolResult, McpError> {
+        tracing::info!("Executing bash command: {}", args.command);
         let req = ExecuteBashRequest {
             command: args.command,
             cwd: args.cwd,
@@ -121,6 +122,7 @@ impl OpenHandsService {
         };
 
         let cmd = self.bash.start_bash_command(req);
+        tracing::info!("Started bash command with ID: {}", cmd.id);
 
         // Simple polling loop
         let mut attempts = 0;

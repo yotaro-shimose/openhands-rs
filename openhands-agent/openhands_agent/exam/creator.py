@@ -30,6 +30,23 @@ Your primary role is to create a comprehensive "Gold Standard" implementation of
 * When reproducing bugs or implementing fixes, use a single file rather than creating multiple files with different versions
 </FILE_SYSTEM_GUIDELINES>
 """
+# Define mode-specific instructions
+MODE_INSTRUCTIONS = {
+    "functional": (
+        "- **Implementation**: Create a functional module (e.g., `src/lib.rs` or `src/solver.rs`).\n"
+        "- **Integration Tests**: Create `tests/verify.rs`. This file MUST include `use <crate_name>::<module>;` to import the definitions from your solution files.\n"
+        "- **Verification**: The tests must verify the public interface of your implementation. The logic will be removed later, but the interface must remain so these tests can still compile."
+    ),
+    "imitation": (
+        "- **Implementation**: Provide a 'Reference Pattern' in `question.md` and a matching skeleton in `src/`.\n"
+        "- **Tests**: Optional. If created, they must import from the `src/` implementation just like functional tests.\n"
+        "- **Verification**: Primarily focused on whether the student adapted the pattern idiomatic to the library."
+    ),
+    "conceptual": (
+        "- **Implementation**: Define the necessary structs/traits in `src/` but focus on the 'why' in documentation.\n"
+        "- **Tests**: Usually skipped. Evaluation is based on `cargo check` of the interface and the written response."
+    ),
+}
 
 
 async def create_exam(
@@ -88,44 +105,37 @@ async def create_exam(
 
             # Phase 1: Generate Solution
             logger.info("Phase 1: Generating Solution...")
-            solution_prompt = f"""\
-**Role:** You are a Senior Rust Engineer and Pedagogical Expert.
-**Context:** You are creating the 'Gold Standard' reference for a high-fidelity RL training exercise.
-**Topic Abstract:**
-- Title: {topic.title}
-- Goal: {topic.description}
-- Eval Mode: {topic.eval_mode}
-- Required APIs: {", ".join(topic.api_surface)}
-- Reference Document: {topic.source_reference}
+            # Select the specific instruction
+            mode_extra = MODE_INSTRUCTIONS.get(topic.eval_mode, "")
 
-**Your Objective:** Create a complete, perfect implementation of this exercise. This includes the problem statement, the grading criteria, and the reference solution code. This will be committed to a repository to define the ground truth for an RL solver.
+            # Construct the dynamic prompt
+            solution_prompt = f"""\
+**Role:** Senior Rust Engineer & Pedagogical Expert.
+**Context:** Creating a '{topic.eval_mode}' Gold Standard exercise for Topic: {topic.title}.
+
+**Pedagogical Requirements ({topic.eval_mode} mode):**
+{mode_extra}
 
 **Step 1: Context Retrieval**
-Use your tools to read `{topic.source_reference}`. Identify idiomatic usage, required traits, and common pitfalls associated with the target APIs.
+Read `{topic.source_reference}`. Identify target APIs: {", ".join(topic.api_surface)}.
 
 **Step 2: Generate Infrastructure Files**
+1. `question.md`: Clear problem statement. (For `imitation`, include the code scaffold here).
+2. `rubric.md`: The 'Ground Truth' for the Evaluator. List specific API usage requirements.
 
-1. `question.md`: Provide a professional problem statement. 
-   - For `imitation`: Include a 'Reference Pattern' excerpted from the library docs/source that the student must adapt.
-   - For `conceptual`: Frame the task as a technical deep-dive or architectural explanation.
-   - For `functional`: Focus on input/output requirements and performance constraints.
+3. **Implementation (`src/`)**: 
+   - Implement the perfect, idiomatic solution within the crate's `src/` directory.
+   - **Crucial**: Ensure all target functions, structs, and traits are marked `pub` so they can be imported by external tests.
 
-2. `rubric.md`: This is the MOST IMPORTANT file for the LLM-as-a-Judge. Provide clear, binary, or scale-based criteria.
-   - Must check for: Correct API usage, adherence to the {topic.eval_mode} requirements, and Rust idioms.
-   - For `conceptual`: List specific technical points or keywords that must be explained in the learner's response.
-
-3. `solution/`: Implement the perfect, idiomatic reference solution.
-   - This code must demonstrate exactly what we expect from a top-tier agent.
-   - Ensure all imports from `repos/library` are correct.
-
-4. `tests/` (Optional for `conceptual`/`imitation`): 
-   - If the mode is `functional`, a test suite (e.g., `tests/verify.rs`) is MANDATORY.
-   - For other modes, only include tests if they add value (e.g., checking if an imitation-mode refactor still produces correct math results). If tests are not suited for the topic, omit this folder.
+4. **Integration Tests (`tests/`)**: 
+   - (If required) Create tests in the `tests/` directory.
+   - **Crucial**: These files MUST import definitions from your `src/` implementation using the crate name (e.g., `use {project_repo.name}::...`).
+   - The tests must verify that the public interface of your solution works as expected.
 
 **Strict Constraints:**
-- **CPU-Only**: No GPU/WGPU or non-standard Linux FFI.
-- **Non-Destructive**: Do not modify files in `repos/library`.
-- **Environment**: All generated code must be compatible with an Ubuntu environment.
+- CPU-only (Ubuntu).
+- Do not modify `repos/library`.
+- Ensure `Cargo.toml` is configured so that the library crate name is correctly defined for integration tests.
 """
 
             res_wrapper = await agent.run(solution_prompt, max_turns=30)
@@ -144,26 +154,21 @@ Use your tools to read `{topic.source_reference}`. Identify idiomatic usage, req
 
             # Phase 2: Generate Problem
             logger.info("Phase 2: Generating Problem...")
-            problem_prompt = """\
-**Current Task: Convert 'Gold Solution' to 'Student Challenge'**
+            problem_prompt = f"""\
+**Current Task: Strip Solution (Mode: {topic.eval_mode})**
 
-The "Gold Standard" implementation is complete. Now, you must prepare the repository for the solver by removing the answers while preserving the evaluation infrastructure.
+1. **Hollow Out Logic (src/)**: 
+   - Replace the bodies of the functions in `src/` with `todo!()`.
+   - **STRICT RULE**: Do NOT change function signatures, trait definitions, or `pub` visibility. 
+   - The interface in `src/` must remain exactly as it was so that the `tests/` can still import them.
 
-**Actions:**
-1. **Hollow Out the Logic:** - Identify the solution code you just implemented.
-   - Replace the core logic inside functions/methods with the `todo!()` macro or descriptive `// TODO` comments.
-   - Retain all necessary imports, struct definitions, and function signatures so the code still compiles.
+2. **Preserve Validation (tests/ & rubric.md)**: 
+   - Do NOT touch the `tests/` directory or `rubric.md`.
+   - The import statements in the tests (e.g., `use crate::...`) must remain valid.
 
-2. **Preserve Evaluation Files:** - Do NOT modify `question.md`, `rubric.md`, or the `tests/` directory. 
-   - These must remain exactly as they are to provide the reward signal for the solver.
-
-3. **Scaffolding for Imitation Mode:**
-   - If this is an `imitation` exercise, ensure the `question.md` still contains the 'Reference Pattern' you excerpted earlier. The student needs this "scaffold" to perform the rewrite.
-
-4. **Verification:**
-   - Confirm that the project still passes `cargo check` (compilation check) despite the missing logic.
-
-**Goal:** The final state of the repository should be a "ready-to-code" environment where the problem is clear, the tests are ready to run, but the solution is entirely absent.
+3. **Verification**: 
+   - Run `cargo check`. It must pass (proving the interface is intact).
+   {"- Run `cargo test`. They must FAIL with 'not yet implemented' errors." if topic.eval_mode == "functional" else "- (Tests skipped)."}
 """
             # Continue the conversation by appending the new user message
             new_message: EasyInputMessageParam = {

@@ -1,3 +1,5 @@
+from pydantic import BaseModel
+from oai_utils.agent import AgentWrapper
 from oai_utils.agent import AgentsSDKModel
 import subprocess
 import tempfile
@@ -63,40 +65,80 @@ async def solve_exam(model: AgentsSDKModel, exam: CodingExam) -> Path:
         raise e
 
 
+class EvaluationResponse(BaseModel):
+    description: str
+    score: int  # out of 100
+
+
 async def evaluate_exam(
     model: AgentsSDKModel, exam: CodingExam, workspace_path: Path
-) -> str:
+) -> EvaluationResponse:
     """
     Evaluates a solution in the given workspace against the exam rubric.
-    Returns the evaluation report as a string.
+    Returns the evaluation report as an EvaluationResponse.
     """
     logger.info(f"Evaluating exam solution at {workspace_path}")
+    prompt = f"""\
+**Role:** You are a Principal Software Engineer and Technical Auditor.
+**Context:** You are evaluating a student's solution for a coding exam within a sandboxed Rust environment.
 
+**Evaluation Materials:**
+1. **The Question:**
+---
+{exam.question}
+---
+
+2. **The Grading Rubric:**
+---
+{exam.eval_rubric}
+---
+
+**Your Task:**
+Perform a rigorous, multi-stage audit of the current workspace to determine the student's final score.
+
+**Step 1: Functional Verification**
+- Attempt to compile the project (`cargo check`).
+- Execute all unit tests (`cargo test`). 
+- Note: If the question is purely `conceptual` (documentation-based), skip code execution and focus on text analysis.
+
+**Step 2: Library Integrity Check**
+- The student was provided the `{exam.library.name}` library as a dependency.
+- Verify that the student correctly utilized the library APIs as requested in the question.
+- Check for "workarounds" (e.g., using `std` vectors when `numrs2::Array` was required).
+
+**Step 3: Rubric Analysis**
+- Grade the submission point-by-point against the provided **Grading Rubric**.
+- Be objective: Award partial credit only where the rubric explicitly allows it.
+- Identify any "Negative Criteria" (e.g., performance bottlenecks or non-idiomatic Rust).
+
+**Step 4: Report Generation**
+Your final output must contain:
+1. **Summary:** A brief overview of the student's performance.
+2. **Audit Log:** Results of compilation and test runs.
+3. **Rubric Scoring:** A list showing points earned for each rubric item.
+4. **Final Verdict:** You must end your response with exactly one line in this format:
+   `TOTAL USER SCORE: <score>/100`
+
+**Constraint:** Do not be lenient. This evaluation is used for Reinforcement Learning training; a precise and consistent reward signal is mandatory.
+"""
     try:
         # Initialize Runtime on the existing solution workspace
         async with RustCodingEnvironment(workspace_dir=workspace_path) as runtime:
-            # Use provided config or default
-            agent = OpenHandsAgent.create(model=model, mcp_server=runtime)
-
-            # Construct Prompt
-            prompt = (
-                f"You are a strict exam grader.\n\n"
-                f"Your Task: Evaluate the student's solution in the current directory against the provided rubric.\n\n"
-                f"Question:\n{exam.question}\n\n"
-                f"Rubric:\n{exam.eval_rubric}\n\n"
-                f"Instructions:\n"
-                f"1. Run the tests (e.g. `cargo test`) to ensure correctness.\n"
-                f"2. Inspect the code to check for specific requirements, code style, and potential cheating.\n"
-                f"3. Provide a detailed report with points awarded for each rubric item.\n"
-                f"4. Conclude with a 'TOTAL USER SCORE: <score>/<total>' line.\n"
+            agent = AgentWrapper[EvaluationResponse].create(
+                name="exam_evaluator",
+                instructions=prompt,
+                model=model,
+                mcp_servers=[runtime],
+                output_type=EvaluationResponse,
             )
 
             logger.info("Starting agent to evaluate exam...")
-            # Evaluation might not take as many turns as solving
-            result = await agent.run(prompt, max_turns=15)
-
-            return result.final_output or "No evaluation report generated."
+            result = await agent.run("Now start evaluation", max_turns=60)
+            return result.final_output()
 
     except Exception as e:
         logger.error(f"Failed to evaluate exam: {e}")
         raise e
+
+
+4
