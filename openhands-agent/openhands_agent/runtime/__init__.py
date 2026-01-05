@@ -5,7 +5,6 @@ from openhands_agent.prompts import SYSTEM_PROMPT
 from openhands_agent.runtime.runtime import Runtime, LocalRuntime
 from openhands_agent.runtime.docker_runtime import DockerRuntime
 from openhands_agent.runtime.rust_env import RustCodingEnvironment
-from openhands_agent.tracing import AgentContentPrinter
 
 __all__ = [
     "OpenHandsAgent",
@@ -14,5 +13,4 @@ __all__ = [
     "LocalRuntime",
     "DockerRuntime",
     "RustCodingEnvironment",
-    "AgentContentPrinter",
 ]

@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 import uuid
 from pathlib import Path
@@ -67,6 +68,12 @@ class DockerRuntime(Runtime):
         self._container_id: Optional[str] = None
 
     async def __aenter__(self) -> MCPServerStreamableHttp:
+        # 0. Ensure workspace_dir is world-writable for the container user
+        try:
+            os.chmod(self.workspace_dir, 0o777)
+        except Exception as e:
+            raise RuntimeError(f"Failed to chmod {self.workspace_dir}: {e}")
+
         # 1. Verify image exists
         proc = await asyncio.create_subprocess_exec(
             "docker",

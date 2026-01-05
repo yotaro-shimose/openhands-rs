@@ -14,11 +14,11 @@ from agents.mcp import MCPServerStreamableHttp
 from agents.tracing import add_trace_processor
 from dotenv import load_dotenv
 from oai_utils.agent import AgentsSDKModel
+from oai_utils.tracing import AgentContentPrinter
 
 from openhands_agent import OpenHandsAgent
 from openhands_agent.runtime import LocalRuntime
 from openhands_agent.runtime.docker_runtime import DockerRuntime
-from openhands_agent.tracing import AgentContentPrinter
 
 # Enable tracing for test visibility
 add_trace_processor(AgentContentPrinter())
