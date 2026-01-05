@@ -51,7 +51,9 @@ class OpenHandsAgent:
                 instructions=SYSTEM_PROMPT,
                 mcp_servers=[mcp_server],
                 model=model,
-                model_settings=ModelSettings(tool_choice="auto"),
+                model_settings=ModelSettings(
+                    tool_choice="auto", parallel_tool_calls=True
+                ),
             ),
         )
 
