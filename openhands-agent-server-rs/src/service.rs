@@ -1,6 +1,5 @@
-use openhands_sdk_rs::models::{BashEvent, ExecuteBashRequest};
-use openhands_sdk_rs::runtime::bash::BashEventService;
-use openhands_sdk_rs::runtime::file::FileService;
+use crate::models::{BashEvent, ExecuteBashRequest};
+use crate::runtime::bash::BashEventService;
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::*,
@@ -26,7 +25,7 @@ use crate::tools::task_tracker::{run_task_tracker, TaskTrackerArgs};
 #[derive(Clone)]
 pub struct OpenHandsService {
     bash: Arc<BashEventService>,
-    file: Arc<FileService>,
+    workspace_dir: PathBuf,
     editor_history: Arc<Mutex<HashMap<PathBuf, Vec<String>>>>,
     tool_router: ToolRouter<OpenHandsService>,
 }
@@ -40,10 +39,10 @@ pub struct ExecuteBashArgs {
 
 #[tool_router]
 impl OpenHandsService {
-    pub fn new(bash: BashEventService, file: FileService) -> Self {
+    pub fn new(bash: BashEventService, workspace_dir: PathBuf) -> Self {
         Self {
             bash: Arc::new(bash),
-            file: Arc::new(file),
+            workspace_dir,
             editor_history: Arc::new(Mutex::new(HashMap::new())),
             tool_router: Self::tool_router(),
         }
@@ -57,7 +56,7 @@ impl OpenHandsService {
         &self,
         Parameters(args): Parameters<GlobArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let output = run_glob(&args, &self.file.workspace_dir)?;
+        let output = run_glob(&args, &self.workspace_dir)?;
         Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 
@@ -69,7 +68,7 @@ impl OpenHandsService {
         &self,
         Parameters(args): Parameters<GrepArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let output = run_grep(&args, &self.file.workspace_dir)?;
+        let output = run_grep(&args, &self.workspace_dir)?;
         Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 
@@ -81,7 +80,7 @@ impl OpenHandsService {
         &self,
         Parameters(args): Parameters<TaskTrackerArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let output = run_task_tracker(&args, &self.file.workspace_dir)?;
+        let output = run_task_tracker(&args, &self.workspace_dir)?;
         Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 
@@ -93,7 +92,7 @@ impl OpenHandsService {
         &self,
         Parameters(args): Parameters<FileEditorArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let output = run_file_editor(&args, &self.file.workspace_dir, &self.editor_history).await?;
+        let output = run_file_editor(&args, &self.workspace_dir, &self.editor_history).await?;
         Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 
@@ -169,7 +168,7 @@ impl OpenHandsService {
         &self,
         Parameters(args): Parameters<ReadFileArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let output = run_read_file(&args, &self.file.workspace_dir)?;
+        let output = run_read_file(&args, &self.workspace_dir)?;
         Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 
@@ -181,7 +180,7 @@ impl OpenHandsService {
         &self,
         Parameters(args): Parameters<WriteFileArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let output = run_write_file(&args, &self.file.workspace_dir)?;
+        let output = run_write_file(&args, &self.workspace_dir)?;
         Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 
@@ -193,7 +192,7 @@ impl OpenHandsService {
         &self,
         Parameters(args): Parameters<ListFilesArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let output = run_list_files(&args, &self.file.workspace_dir)?;
+        let output = run_list_files(&args, &self.workspace_dir)?;
         Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 
@@ -202,7 +201,7 @@ impl OpenHandsService {
         &self,
         Parameters(args): Parameters<DeleteFileArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let output = run_delete_file(&args, &self.file.workspace_dir)?;
+        let output = run_delete_file(&args, &self.workspace_dir)?;
         Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 }

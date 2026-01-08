@@ -1,6 +1,0 @@
-[workspace]
-resolver = "2"
-members = [
-    "openhands-agent-server-rs",
-    "openhands-sdk-rs",
-]

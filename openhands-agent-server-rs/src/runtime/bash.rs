@@ -152,22 +152,6 @@ impl BashEventService {
         }
     }
 
-    pub fn get_bash_event(&self, id: Uuid) -> Option<BashEvent> {
-        let pattern = self.bash_events_dir.join(format!("*_{}", id.simple()));
-        let paths: Vec<_> = glob(pattern.to_str().unwrap_or(""))
-            .ok()
-            .into_iter()
-            .flatten()
-            .filter_map(Result::ok)
-            .collect();
-
-        if let Some(path) = paths.first() {
-            Self::load_event(path.clone())
-        } else {
-            None
-        }
-    }
-
     pub fn search_bash_events(&self, command_id: Option<Uuid>) -> BashEventPage {
         let mut events = Vec::new();
         let full_pattern = self.bash_events_dir.join("*");

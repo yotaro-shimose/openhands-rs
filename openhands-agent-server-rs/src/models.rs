@@ -10,25 +10,6 @@ pub struct ExecuteBashRequest {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct FileReadRequest {
-    pub path: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct FileWriteRequest {
-    pub path: String,
-    pub content: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct FileResponse {
-    pub path: String,
-    pub content: Option<String>,
-    pub success: bool,
-    pub error: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "kind")]
 pub enum BashEvent {
     BashCommand(BashCommand),
@@ -36,13 +17,6 @@ pub enum BashEvent {
 }
 
 impl BashEvent {
-    pub fn id(&self) -> Uuid {
-        match self {
-            BashEvent::BashCommand(c) => c.id,
-            BashEvent::BashOutput(o) => o.id,
-        }
-    }
-
     pub fn timestamp(&self) -> DateTime<Utc> {
         match self {
             BashEvent::BashCommand(c) => c.timestamp,
@@ -75,25 +49,4 @@ pub struct BashOutput {
 pub struct BashEventPage {
     pub items: Vec<BashEvent>,
     pub next_page_id: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct InitConversationRequest {
-    pub system_message: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ConversationResponse {
-    pub id: String,
-    pub status: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MessageRequest {
-    pub content: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MessageResponse {
-    pub response: String,
 }

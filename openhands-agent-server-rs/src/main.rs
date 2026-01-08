@@ -1,13 +1,15 @@
+mod logger;
+mod models;
+mod runtime;
 mod service;
 mod tools;
 
 use axum::Router;
-use openhands_sdk_rs::runtime::bash::BashEventService;
-use openhands_sdk_rs::runtime::file::FileService;
 use rmcp::transport::{
     streamable_http_server::{session::local::LocalSessionManager, tower::StreamableHttpService},
     StreamableHttpServerConfig,
 };
+use runtime::bash::BashEventService;
 use service::OpenHandsService;
 use std::env;
 use std::path::PathBuf;
@@ -17,8 +19,8 @@ use tokio::net::TcpListener;
 async fn main() {
     dotenv::dotenv().ok();
 
-    // Set up tracing using the SDK's logger
-    openhands_sdk_rs::logger::init_logging();
+    // Set up tracing using the local logger
+    logger::init_logging();
 
     let cwd = env::current_dir().unwrap();
 
@@ -28,10 +30,8 @@ async fn main() {
     let workspace_path = env::var("WORKSPACE_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| cwd.join("workspace"));
-    let file_service = FileService::new(workspace_path);
-
     // Create the MCP service
-    let openhands_service = OpenHandsService::new(bash_service, file_service);
+    let openhands_service = OpenHandsService::new(bash_service, workspace_path);
 
     // Wrap it in StreamableHttpService
     let mcp_service: StreamableHttpService<OpenHandsService, LocalSessionManager> =
