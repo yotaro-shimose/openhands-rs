@@ -1,7 +1,7 @@
+from typing import Self
 from pathlib import Path
 from typing import Dict, Optional, List
 from openhands_agent.runtime.docker_runtime import DockerRuntime
-from agents.mcp import MCPServerStreamableHttp
 
 
 class RustCodingEnvironment(DockerRuntime):
@@ -51,7 +51,7 @@ class RustCodingEnvironment(DockerRuntime):
             port_mappings=port_mappings,
         )
 
-    async def __aenter__(self) -> MCPServerStreamableHttp:
+    async def __aenter__(self) -> Self:
         """Starts the Rust coding environment."""
         print("🦀 Initializing Rust Coding Environment...")
 

@@ -96,7 +96,8 @@ async def generate_exercises(
     img_name = image_name or os.getenv("OPENHANDS_IMAGE_NAME", "coder-mcp")
     async with DockerRuntime(
         workspace_dir=str(work_dir), image_name=img_name
-    ) as mcp_server:
+    ) as img_runtime:
+        mcp_server = img_runtime.server
         for rust_file in experiment_batch:
             print(f"--- Analyzing {rust_file.name} ---")
 

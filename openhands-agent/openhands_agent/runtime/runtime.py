@@ -17,13 +17,19 @@ class Runtime(ABC):
     """
 
     @abstractmethod
-    async def __aenter__(self) -> MCPServerStreamableHttp:
-        """Enter runtime context and return MCP server."""
+    async def __aenter__(self) -> "Runtime":
+        """Enter runtime context and return self."""
         pass
 
     @abstractmethod
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Exit runtime context and cleanup."""
+        pass
+
+    @property
+    @abstractmethod
+    def server(self) -> MCPServerStreamableHttp:
+        """The underlying MCP server provided by this runtime."""
         pass
 
 
@@ -34,8 +40,8 @@ class LocalRuntime(Runtime):
 
     Example:
         # Start server: cd coder-mcp && cargo run
-        async with LocalRuntime() as mcp_server:
-            async with OpenHandsAgent(runtime=mcp_server) as agent:
+        async with LocalRuntime() as runtime:
+            async with OpenHandsAgent(mcp_server=runtime.server) as agent:
                 result = await agent.run("Create hello.py")
     """
 
@@ -54,7 +60,7 @@ class LocalRuntime(Runtime):
         self.timeout = timeout
         self._mcp_server: MCPServerStreamableHttp | None = None
 
-    async def __aenter__(self) -> MCPServerStreamableHttp:
+    async def __aenter__(self) -> "LocalRuntime":
         """Connect to local MCP server."""
         self._mcp_server = MCPServerStreamableHttp(
             name="Local MCP Server",
@@ -64,9 +70,16 @@ class LocalRuntime(Runtime):
             },
             cache_tools_list=False,
         )
-        return await self._mcp_server.__aenter__()
+        await self._mcp_server.__aenter__()
+        return self
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Disconnect from MCP server."""
         if self._mcp_server:
             await self._mcp_server.__aexit__(exc_type, exc_val, exc_tb)
+
+    @property
+    def server(self) -> MCPServerStreamableHttp:
+        if not self._mcp_server:
+            raise RuntimeError("LocalRuntime not started (use async with)")
+        return self._mcp_server

@@ -102,7 +102,7 @@ async def create_exam(
                 name="SyllabusWorker",
                 instructions=EXAM_CREATOR_SYSTEM_PROMPT,
                 model=model,
-                mcp_servers=[runtime],
+                mcp_servers=[runtime.server],
                 model_settings=ModelSettings(
                     tool_choice="auto", parallel_tool_calls=True
                 ),

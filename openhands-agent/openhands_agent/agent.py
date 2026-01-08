@@ -21,7 +21,7 @@ class OpenHandsAgent:
         from openhands_agent import OpenHandsAgent, LocalRuntime
 
         async with LocalRuntime() as runtime:
-            async with OpenHandsAgent(runtime=runtime) as agent:
+            async with OpenHandsAgent(mcp_server=runtime.server) as agent:
                 result = await agent.run("Create a hello world script")
                 print(result.final_output)
 
@@ -30,7 +30,7 @@ class OpenHandsAgent:
         from openhands_agent import OpenHandsAgent
 
         async with DockerRuntime(image_name="coder-mcp") as runtime:
-            async with OpenHandsAgent(runtime=runtime) as agent:
+            async with OpenHandsAgent(mcp_server=runtime.server) as agent:
                 result = await agent.run("Create a hello world script")
                 print(result.final_output)
     """

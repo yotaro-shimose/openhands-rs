@@ -1,3 +1,4 @@
+from typing import Self
 import asyncio
 import subprocess
 import time
@@ -67,7 +68,7 @@ class DockerRuntime(Runtime):
         self.port_mappings = port_mappings or []
         self._container_id: Optional[str] = None
 
-    async def __aenter__(self) -> MCPServerStreamableHttp:
+    async def __aenter__(self) -> Self:
         # 0. Ensure workspace_dir is world-writable for the container user (recursive)
         try:
             subprocess.run(["chmod", "-R", "777", str(self.workspace_dir)], check=True)
@@ -184,7 +185,14 @@ class DockerRuntime(Runtime):
             # Allow long-running commands (e.g., cargo build, rustup) up to 5 minutes
             client_session_timeout_seconds=300,
         )
-        return await self._mcp_server.__aenter__()
+        await self._mcp_server.__aenter__()
+        return self
+
+    @property
+    def server(self) -> MCPServerStreamableHttp:
+        if not hasattr(self, "_mcp_server") or not self._mcp_server:
+            raise RuntimeError("DockerRuntime not started (use async with)")
+        return self._mcp_server
 
     async def _wait_for_health(self, timeout: float = 30.0):
         """Wait for the server to respond to health checks."""

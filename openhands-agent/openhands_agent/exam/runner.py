@@ -45,7 +45,7 @@ async def solve_exam(model: AgentsSDKModel, exam: CodingExam) -> Path:
         # Initialize Runtime
         async with RustCodingEnvironment(workspace_dir=work_dir) as runtime:
             # Use provided config or default
-            agent = OpenHandsAgent.create(model=model, mcp_server=runtime)
+            agent = OpenHandsAgent.create(model=model, mcp_server=runtime.server)
 
             # Construct Prompt
             prompt = (
@@ -128,7 +128,7 @@ Your final output must contain:
                 name="exam_evaluator",
                 instructions=prompt,
                 model=model,
-                mcp_servers=[runtime],
+                mcp_servers=[runtime.server],
                 output_type=EvaluationResponse,
             )
 
