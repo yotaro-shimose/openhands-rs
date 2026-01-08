@@ -140,6 +140,7 @@ Read `{topic.source_reference}`. Identify target APIs: {", ".join(topic.api_surf
 **Strict Constraints:**
 - CPU-only (Ubuntu).
 - Do not modify `repos/library`.
+- **Dependency Management**: When adding dependencies to `Cargo.toml`, you MUST use the registry version (e.g., `numrs2 = "0.1.0"`) rather than a local path (e.g., `path = "..."`). Treat the library as if it is already published on crates.io.
 - Ensure `Cargo.toml` is configured so that the library crate name is correctly defined for integration tests.
 """
 

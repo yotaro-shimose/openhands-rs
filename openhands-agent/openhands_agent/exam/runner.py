@@ -1,49 +1,26 @@
 from pydantic import BaseModel
 from oai_utils.agent import AgentWrapper
 from oai_utils.agent import AgentsSDKModel
-import subprocess
-import tempfile
 from pathlib import Path
 
 from loguru import logger
 
 from openhands_agent.agent import OpenHandsAgent
 from openhands_agent.exam.exam import CodingExam
-from openhands_agent.exam.repository import GitRepository
 from openhands_agent.runtime.rust_env import RustCodingEnvironment
 
 
-async def solve_exam(model: AgentsSDKModel, exam: CodingExam) -> Path:
+async def solve_exam(
+    model: AgentsSDKModel, exam: CodingExam, workspace_path: Path
+) -> None:
     """
-    Solves the given exam by running an agent in a temporary environment.
-    Returns the path to the temporary workspace containing the solution.
+    Solves the given exam by running an agent in the provided workspace.
     """
-    # Create temp workspace
-    work_dir = Path(tempfile.mkdtemp(prefix="exam_solve_"))
-    logger.info(f"Created temp workspace for solution at {work_dir}")
+    logger.info(f"Solving exam {exam.id} in {workspace_path}")
 
     try:
-        # Clone project repo
-        logger.info(f"Cloning exam project to {work_dir}")
-        subprocess.run(
-            ["git", "clone", str(exam.project.local_dir), str(work_dir)],
-            check=True,
-            capture_output=True,
-        )
-
-        # Initialize GitRepository for the workspace
-        workspace_repo = GitRepository(local_dir=work_dir)
-
-        # Config User
-        workspace_repo.run_git(["config", "user.name", "OpenHands Exam Solver"])
-        workspace_repo.run_git(["config", "user.email", "solver@openhands.ai"])
-
-        # Checkout problem commit
-        logger.info(f"Checking out problem commit: {exam.problem_commit}")
-        workspace_repo.run_git(["checkout", exam.problem_commit])
-
         # Initialize Runtime
-        async with RustCodingEnvironment(workspace_dir=work_dir) as runtime:
+        async with RustCodingEnvironment(workspace_dir=workspace_path) as runtime:
             # Use provided config or default
             agent = OpenHandsAgent.create(model=model, mcp_server=runtime.server)
 
@@ -57,8 +34,6 @@ async def solve_exam(model: AgentsSDKModel, exam: CodingExam) -> Path:
 
             logger.info("Starting agent to solve exam...")
             await agent.run(prompt, max_turns=30)
-
-        return work_dir
 
     except Exception as e:
         logger.error(f"Failed to solve exam: {e}")

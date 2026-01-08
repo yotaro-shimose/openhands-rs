@@ -53,17 +53,26 @@ async def main():
         # Initialize GitRepository for the cloned workspace
         workspace_repo = GitRepository(local_dir=temp_path)
 
-        # Checkout the gold solution commit
-        logger.info(f"Checking out gold solution commit: {exam.solution_commit}")
-        workspace_repo.run_git(["checkout", exam.solution_commit])
+        # Config User for the workspace (needed for git operations during solve)
+        workspace_repo.run_git(["config", "user.name", "OpenHands Exam Solver"])
+        workspace_repo.run_git(["config", "user.email", "solver@openhands.ai"])
 
-        # The template now contains a pre-configured Cargo.toml with registry dependencies.
-        # No need to copy library or create Cargo.toml manually.
-        logger.info(
-            "Relying on template boilerplate (Cargo.toml + registry dependencies)"
+        # Checkout the problem commit to start solving
+        logger.info(f"Checking out problem commit: {exam.problem_commit}")
+        workspace_repo.run_git(["checkout", exam.problem_commit])
+
+        # Solve the exam
+        logger.info("--- Phase 1: Solving the Exam ---")
+        from openhands_agent.exam.runner import solve_exam
+
+        await solve_exam(
+            model=model,
+            exam=exam,
+            workspace_path=temp_path,
         )
 
         # Evaluate the exam
+        logger.info("\n--- Phase 2: Evaluating the Solution ---")
         evaluation = await evaluate_exam(
             model=model,
             exam=exam,
