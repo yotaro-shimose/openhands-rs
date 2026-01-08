@@ -24,7 +24,7 @@ def setup_test_repos(base_dir: Path) -> tuple[GitRepository, GitRepository]:
     (project_dir / "src").mkdir()
     (project_dir / "src/main.rs").write_text('fn main() { println!("Hello"); }')
 
-    repo = GitRepository(name="project", local_dir=project_dir)
+    repo = GitRepository(local_dir=project_dir)
     # Allow pushing to the current branch (needed for tests pushing back to this non-bare repo)
     repo.run_git(["config", "receive.denyCurrentBranch", "ignore"])
     repo.add(".")
@@ -43,7 +43,7 @@ def setup_test_repos(base_dir: Path) -> tuple[GitRepository, GitRepository]:
         'pub fn get_greeting_suffix() -> String { "World".to_string() }'
     )
 
-    lib_repo = GitRepository(name="library", local_dir=lib_dir)
+    lib_repo = GitRepository(local_dir=lib_dir)
     lib_repo.add(".")
     lib_repo.commit("Initial lib commit")
 
