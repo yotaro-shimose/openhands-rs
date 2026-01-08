@@ -8,16 +8,15 @@ This project provides a **Dockerized Rust development environment** with persist
 
 ```
 openhands-rs/
-├── openhands-agent-server-rs/     # Rust MCP server providing tools for agents
+├── coder-mcp/                      # Rust MCP server providing tools for agents
 │   └── src/
 │       ├── main.rs                 # Server entry point
 │       ├── service.rs              # MCP service implementation
 │       └── tools/                  # File editing, Bash, and other tools
-├── openhands-internal-mcp-client/  # Python client for the MCP server
-│   ├── docker_runtime.py           # Generic Docker container manager
-│   ├── rust_env.py                 # Rust-specific environment with caching
-│   ├── test_rust_env.py            # Integration tests
-│   └── test_tokio_cache.py         # Tokio dependency caching demo
+├── openhands-agent/                # Python agent implementation
+│   ├── openhands_agent/            # Core package
+│   │   ├── runtime/                # Docker and local runtime managers
+│   │   └── agent.py                # Core agent loop
 └── Dockerfile                       # Multi-stage build for Rust environment
 ```
 
@@ -37,7 +36,7 @@ Specialized environment built on `DockerRuntime` that:
 - **Workspace persistence**: Project files survive container restarts
 - **Non-root user**: Runs as UID 1000 for proper file permissions
 
-### 3. Rust MCP Server (`openhands-agent-server-rs`)
+### 3. Rust MCP Server (`coder-mcp`)
 A Rust server implementing the Model Context Protocol (MCP) that provides tools for:
 - File operations (read, write, edit)
 - Bash command execution
@@ -158,7 +157,7 @@ async with RustCodingEnvironment() as server:
 - [`Dockerfile`](../Dockerfile) - Added Rust toolchain, sccache, non-root user
 - [`rust_env.py`](rust_env.py) - Implemented RustCodingEnvironment
 - [`docker_runtime.py`](docker_runtime.py) - Improved path handling, error messages
-- [`main.rs`](../openhands-agent-server-rs/src/main.rs) - Fixed workspace path to `/workspace`
+- [`main.rs`](../coder-mcp/src/main.rs) - Fixed workspace path to `/workspace`
 
 ## Known Limitations
 
@@ -169,5 +168,5 @@ async with RustCodingEnvironment() as server:
 
 ---
 
-**Last Updated**: 2026-01-02  
-**Status**: Core functionality complete, minor issues in testing infrastructure
+**Last Updated**: 2026-01-08  
+**Status**: Decoupled, Rebranded, and Standalone.

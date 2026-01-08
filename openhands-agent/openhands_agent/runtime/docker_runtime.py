@@ -20,7 +20,7 @@ class DockerRuntime(Runtime):
     Example:
         async with DockerRuntime(
             workspace_dir="/path/to/my/project",
-            image_name="openhands-agent-server-rs"
+            image_name="coder-mcp"
         ) as runtime:
             async with OpenHandsAgent(runtime=runtime) as agent:
                 result = await agent.run("Create hello.py")
@@ -30,7 +30,7 @@ class DockerRuntime(Runtime):
     def __init__(
         self,
         workspace_dir: str,
-        image_name: str = "openhands-agent-server-rs",
+        image_name: str = "coder-mcp",
         container_name: Optional[str] = None,
         host_port: Optional[int] = None,
         env_vars: Optional[Dict[str, str]] = None,
@@ -42,7 +42,7 @@ class DockerRuntime(Runtime):
         Args:
             workspace_dir: Host directory to mount as /workspace in container (required).
                           All file operations go here and persist after container stops.
-            image_name: Docker image to run (default: openhands-agent-server-rs)
+            image_name: Docker image to run (default: coder-mcp)
             container_name: Optional custom container name
             host_port: Optional fixed host port (otherwise dynamically assigned)
             env_vars: Additional environment variables for the container

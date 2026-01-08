@@ -13,7 +13,7 @@ class RustCodingEnvironment(DockerRuntime):
 
     def __init__(
         self,
-        image_name: str = "openhands-agent-server-rs",
+        image_name: str = "coder-mcp",
         cache_dir: str | Path = "./.sccache",
         cargo_cache_dir: str | Path = "./.cargo_cache",
         workspace_dir: str | Path = "./workspace",

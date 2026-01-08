@@ -29,7 +29,7 @@ class OpenHandsAgent:
         from docker_runtime import DockerRuntime
         from openhands_agent import OpenHandsAgent
 
-        async with DockerRuntime(image_name="openhands-agent-server-rs") as runtime:
+        async with DockerRuntime(image_name="coder-mcp") as runtime:
             async with OpenHandsAgent(runtime=runtime) as agent:
                 result = await agent.run("Create a hello world script")
                 print(result.final_output)

@@ -33,7 +33,7 @@ class LocalRuntime(Runtime):
     Use this when you have an MCP server already running locally.
 
     Example:
-        # Start server: cargo run -p openhands-agent-server-rs
+        # Start server: cd coder-mcp && cargo run
         async with LocalRuntime() as mcp_server:
             async with OpenHandsAgent(runtime=mcp_server) as agent:
                 result = await agent.run("Create hello.py")

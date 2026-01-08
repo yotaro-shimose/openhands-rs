@@ -1,3 +1,4 @@
+import os
 from agents.items import TResponseInputItem
 from openai.types.responses.easy_input_message_param import EasyInputMessageParam
 from agents import ModelSettings
@@ -54,6 +55,7 @@ async def create_exam(
     project_repo: GitRepository,
     library_repo: GitRepository,
     topic: LearningTopic,
+    image_name: str,
 ) -> CodingExam:
     """Create a new coding exam based on the provided project and topic.
 
@@ -91,7 +93,10 @@ async def create_exam(
         library_repo.run_git(["clone", str(library_repo.local_dir), str(lib_dir)])
 
         # Initialize Runtime (Persistent for both phases)
-        async with RustCodingEnvironment(workspace_dir=work_dir) as runtime:
+        img_name = image_name or os.getenv("OPENHANDS_IMAGE_NAME", "coder-mcp")
+        async with RustCodingEnvironment(
+            workspace_dir=work_dir, image_name=img_name
+        ) as runtime:
             # Initialize AgentWrapper with Specialized Prompt
             agent = AgentWrapper[str].create(
                 name="SyllabusWorker",
@@ -202,7 +207,7 @@ Read `{topic.source_reference}`. Identify target APIs: {", ".join(topic.api_surf
 
             exam = CodingExam(
                 id=exam_id,
-                image_name="openhands-agent-server-rs",
+                image_name=image_name or os.getenv("OPENHANDS_IMAGE_NAME", "coder-mcp"),
                 project=GitRepository(name="project_repo", local_dir=work_dir),
                 library=library_repo,
                 solution_commit=solution_commit,

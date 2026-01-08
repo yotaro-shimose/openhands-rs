@@ -1,4 +1,5 @@
 import hashlib
+import os
 import traceback
 from pathlib import Path
 
@@ -42,6 +43,7 @@ async def generate_exercises(
     library_repository: GitRepository,
     work_dir: Path,
     limit: int = 3,
+    image_name: str | None = None,
 ) -> list[LearningTopic]:
     """
     Phase 1: Discover Rust files, generate curriculum abstracts and exercises.
@@ -91,7 +93,10 @@ async def generate_exercises(
 
     collected_exercises = []
 
-    async with DockerRuntime(workspace_dir=str(work_dir)) as mcp_server:
+    img_name = image_name or os.getenv("OPENHANDS_IMAGE_NAME", "coder-mcp")
+    async with DockerRuntime(
+        workspace_dir=str(work_dir), image_name=img_name
+    ) as mcp_server:
         for rust_file in experiment_batch:
             print(f"--- Analyzing {rust_file.name} ---")
 
@@ -143,6 +148,7 @@ async def generate_exams(
     library_repository: GitRepository,
     exam_template: GitRepository,
     work_dir: Path,
+    image_name: str,
     push_to_origin: bool = True,
 ) -> list[CodingExam]:
     """
@@ -164,6 +170,7 @@ async def generate_exams(
                 project_repo=exam_template,
                 library_repo=library_repository,
                 topic=ex,
+                image_name=image_name,
             )
             print(f"Exam created successfully: {exam.id}")
 

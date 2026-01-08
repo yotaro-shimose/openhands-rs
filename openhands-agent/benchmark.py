@@ -53,6 +53,10 @@ class BenchmarkConfig(BaseModel):
     exam_limit: int = Field(
         default=2, description="Maximum number of exams to generate"
     )
+    image_name: str = Field(
+        default=os.getenv("OPENHANDS_IMAGE_NAME", "coder-mcp"),
+        description="Docker image to use for the MCP server",
+    )
 
     def get_project_dir(self) -> Path:
         return self.project_dir.resolve()
@@ -165,6 +169,7 @@ async def generate_benchmark_exams(
         library_repository=library,
         exam_template=exam_template,
         work_dir=project_dir,
+        image_name=config.image_name,
     )
 
     if exams:
