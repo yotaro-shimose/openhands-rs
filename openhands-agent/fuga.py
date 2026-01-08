@@ -2,9 +2,6 @@ import asyncio
 import json
 import os
 import shutil
-import subprocess
-import tempfile
-from pathlib import Path
 
 from agents.extensions.models.litellm_model import LitellmModel
 from agents.tracing import add_trace_processor
@@ -51,26 +48,8 @@ async def main():
     logger.info(f"Evaluating gold solution for exam: {exam.id}")
 
     # Create a random temporary directory for evaluation
-    with tempfile.TemporaryDirectory(prefix="gold_eval_") as temp_dir:
-        temp_path = Path(temp_dir)
-        logger.info(f"Using temporary directory: {temp_path}")
-
-        # Clone the template directory to the temp directory
-        # exam.project.local_dir points to the original template
-        logger.info(f"Cloning {exam.project.local_dir} to {temp_path}")
-
-        subprocess.run(
-            ["git", "clone", str(exam.project.local_dir), str(temp_path)],
-            check=True,
-            capture_output=True,
-        )
-
-        # Clean up any existing bash_events from the template to avoid permission issues
-        bash_events_dir = temp_path / "bash_events"
-        if bash_events_dir.exists():
-            logger.info(f"Removing existing bash_events directory at {bash_events_dir}")
-            shutil.rmtree(bash_events_dir)
-
+    temp_path = exam.setup_environment()
+    try:
         # Initialize GitRepository for the cloned workspace
         workspace_repo = GitRepository(name="gold_workspace", local_dir=temp_path)
 
@@ -99,6 +78,9 @@ async def main():
             print("\nSUCCESS: Observed perfect score for gold standard solution.")
         else:
             print(f"\nWARNING: Score is {evaluation.score}, expected 100.")
+    finally:
+        if temp_path.exists():
+            shutil.rmtree(temp_path)
 
 
 if __name__ == "__main__":
