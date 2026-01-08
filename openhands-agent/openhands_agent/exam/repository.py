@@ -11,7 +11,6 @@ class TemporalCodingRepositoryError(Exception):
 
 
 class GitRepository(BaseModel):
-    name: str
     local_dir: Path
 
     def model_post_init(self, __context) -> None:
@@ -37,7 +36,7 @@ class GitRepository(BaseModel):
             )
             return result.stdout.strip()
         except subprocess.CalledProcessError as e:
-            msg = f"Git command failed in repository '{self.name}': {e.stderr or e.stdout}"
+            msg = f"Git command failed: {e.stderr or e.stdout}"
             logger.error(msg)
             raise TemporalCodingRepositoryError(msg) from e
 
@@ -92,10 +91,9 @@ class GitRepository(BaseModel):
                 )
                 continue
 
-            logger.info(f"Removing branch '{branch}' from repository '{self.name}'.")
+            logger.info(f"Removing branch '{branch}'.")
             self.run_git(["branch", "-D", branch])
 
 
 class GitRepositoryDict(TypedDict):
-    name: str
     local_dir: Path

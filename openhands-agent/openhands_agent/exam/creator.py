@@ -83,13 +83,13 @@ async def create_exam(
         logger.info(f"Cloning template from {project_repo.local_dir} to {work_dir}")
         project_repo.run_git(["clone", str(project_repo.local_dir), "."], cwd=work_dir)
 
-        workspace_repo = GitRepository(name="workspace", local_dir=work_dir)
+        workspace_repo = GitRepository(local_dir=work_dir)
         workspace_repo.run_git(["config", "user.email", "yosemat.beta@gmail.com"])
         workspace_repo.run_git(["config", "user.name", "yotaro-shimose"])
 
         lib_dir = work_dir / "repos" / "library"
         lib_dir.parent.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Cloning library {library_repo.name} to {lib_dir}")
+        logger.info(f"Cloning library to {lib_dir}")
         library_repo.run_git(["clone", str(library_repo.local_dir), str(lib_dir)])
 
         # Initialize Runtime (Persistent for both phases)
@@ -134,7 +134,7 @@ Read `{topic.source_reference}`. Identify target APIs: {", ".join(topic.api_surf
 
 4. **Integration Tests (`tests/`)**: 
    - (If required) Create tests in the `tests/` directory.
-   - **Crucial**: These files MUST import definitions from your `src/` implementation using the crate name (e.g., `use {project_repo.name}::...`).
+   - **Crucial**: These files MUST import definitions from your `src/` implementation using the crate name.
    - The tests must verify that the public interface of your solution works as expected.
 
 **Strict Constraints:**
@@ -208,7 +208,7 @@ Read `{topic.source_reference}`. Identify target APIs: {", ".join(topic.api_surf
             exam = CodingExam(
                 id=exam_id,
                 image_name=image_name or os.getenv("OPENHANDS_IMAGE_NAME", "coder-mcp"),
-                project=GitRepository(name="project_repo", local_dir=work_dir),
+                project=GitRepository(local_dir=work_dir),
                 library=library_repo,
                 solution_commit=solution_commit,
                 problem_commit=problem_commit,

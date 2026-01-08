@@ -118,7 +118,7 @@ def ensure_project_template(config: BenchmarkConfig) -> GitRepository:
         except Exception as e:
             raise RuntimeError(f"Failed to initialize project template: {e}")
 
-    return GitRepository(name=config.template_name, local_dir=template_dir)
+    return GitRepository(local_dir=template_dir)
 
 
 async def get_or_generate_topics(
@@ -204,7 +204,7 @@ async def main():
         print(f"Error: {library_path} does not exist.")
         return
 
-    library = GitRepository(name=config.repository_name, local_dir=library_path)
+    library = GitRepository(local_dir=library_path)
 
     # Scaffolding & Preparation
     exam_template = ensure_project_template(config)

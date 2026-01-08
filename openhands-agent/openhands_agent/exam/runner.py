@@ -32,7 +32,7 @@ async def solve_exam(model: AgentsSDKModel, exam: CodingExam) -> Path:
         )
 
         # Initialize GitRepository for the workspace
-        workspace_repo = GitRepository(name="solve_workspace", local_dir=work_dir)
+        workspace_repo = GitRepository(local_dir=work_dir)
 
         # Config User
         workspace_repo.run_git(["config", "user.name", "OpenHands Exam Solver"])
@@ -102,7 +102,7 @@ Perform a rigorous, multi-stage audit of the current workspace to determine the 
 - Note: If the question is purely `conceptual` (documentation-based), skip code execution and focus on text analysis.
 
 **Step 2: Library Integrity Check**
-- The student was provided the `{exam.library.name}` library as a dependency.
+- The student was provided the library as a dependency.
 - Verify that the student correctly utilized the library APIs as requested in the question.
 - Check for "workarounds" (e.g., using `std` vectors when `numrs2::Array` was required).
 

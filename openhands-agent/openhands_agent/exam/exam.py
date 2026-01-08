@@ -18,7 +18,7 @@ class CodingExam(BaseModel):
     question: str
     eval_rubric: str
 
-    def setup_environment(self) -> Path:
+    def setup_tempdir(self) -> Path:
         """Set up a temporary environment for the exam.
 
         1. Creates a random temporary directory.

@@ -48,10 +48,10 @@ async def main():
     logger.info(f"Evaluating gold solution for exam: {exam.id}")
 
     # Create a random temporary directory for evaluation
-    temp_path = exam.setup_environment()
+    temp_path = exam.setup_tempdir()
     try:
         # Initialize GitRepository for the cloned workspace
-        workspace_repo = GitRepository(name="gold_workspace", local_dir=temp_path)
+        workspace_repo = GitRepository(local_dir=temp_path)
 
         # Checkout the gold solution commit
         logger.info(f"Checking out gold solution commit: {exam.solution_commit}")
