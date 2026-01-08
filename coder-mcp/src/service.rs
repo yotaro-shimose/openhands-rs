@@ -23,11 +23,11 @@ use crate::tools::grep::{run_grep, GrepArgs};
 use crate::tools::task_tracker::{run_task_tracker, TaskTrackerArgs};
 
 #[derive(Clone)]
-pub struct OpenHandsService {
+pub struct CoderMcpService {
     bash: Arc<BashEventService>,
     workspace_dir: PathBuf,
     editor_history: Arc<Mutex<HashMap<PathBuf, Vec<String>>>>,
-    tool_router: ToolRouter<OpenHandsService>,
+    tool_router: ToolRouter<CoderMcpService>,
 }
 
 #[derive(serde::Deserialize, schemars::JsonSchema)]
@@ -38,7 +38,7 @@ pub struct ExecuteBashArgs {
 }
 
 #[tool_router]
-impl OpenHandsService {
+impl CoderMcpService {
     pub fn new(bash: BashEventService, workspace_dir: PathBuf) -> Self {
         Self {
             bash: Arc::new(bash),
@@ -207,13 +207,13 @@ impl OpenHandsService {
 }
 
 #[tool_handler]
-impl ServerHandler for OpenHandsService {
+impl ServerHandler for CoderMcpService {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             protocol_version: ProtocolVersion::V_2024_11_05,
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             server_info: Implementation::from_build_env(),
-            instructions: Some("OpenHands Agent Server providing Bash and File tools".to_string()),
+            instructions: Some("Coder MCP Server providing Bash and File tools".to_string()),
         }
     }
 

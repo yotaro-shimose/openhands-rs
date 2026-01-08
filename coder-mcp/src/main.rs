@@ -10,7 +10,7 @@ use rmcp::transport::{
     StreamableHttpServerConfig,
 };
 use runtime::bash::BashEventService;
-use service::OpenHandsService;
+use service::CoderMcpService;
 use std::env;
 use std::path::PathBuf;
 use tokio::net::TcpListener;
@@ -31,12 +31,12 @@ async fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|_| cwd.join("workspace"));
     // Create the MCP service
-    let openhands_service = OpenHandsService::new(bash_service, workspace_path);
+    let coder_mcp_service = CoderMcpService::new(bash_service, workspace_path);
 
     // Wrap it in StreamableHttpService
-    let mcp_service: StreamableHttpService<OpenHandsService, LocalSessionManager> =
+    let mcp_service: StreamableHttpService<CoderMcpService, LocalSessionManager> =
         StreamableHttpService::new(
-            move || Ok(openhands_service.clone()),
+            move || Ok(coder_mcp_service.clone()),
             LocalSessionManager::default().into(),
             StreamableHttpServerConfig::default(),
         );

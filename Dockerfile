@@ -5,7 +5,7 @@ WORKDIR /usr/src/app
 COPY . .
 
 # Build the server binary
-RUN cargo build --release -p openhands-agent-server-rs
+RUN cd coder-mcp && cargo build --release
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -61,7 +61,7 @@ RUN mkdir -p /var/cache/sccache \
 WORKDIR /app
 
 # Copy the binary from the builder stage
-COPY --from=builder /usr/src/app/target/release/openhands-agent-server-rs /usr/local/bin/
+COPY --from=builder /usr/src/app/coder-mcp/target/release/coder-mcp /usr/local/bin/
 
 # Create a workspace directory for the agent
 RUN mkdir -p /workspace && chown -R ${USERNAME}:${USERNAME} /workspace
@@ -81,4 +81,4 @@ ENV CARGO_INCREMENTAL=0
 USER ${USERNAME}
 
 # Entrypoint
-CMD ["openhands-agent-server-rs"]
+CMD ["coder-mcp"]
