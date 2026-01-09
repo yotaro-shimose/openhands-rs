@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -1394,6 +1394,7 @@ source = { editable = "oai_utils" }
 dependencies = [
     { name = "google-cloud-aiplatform" },
     { name = "litellm" },
+    { name = "loguru" },
     { name = "openai" },
     { name = "openai-agents" },
     { name = "pydantic" },
@@ -1403,10 +1404,14 @@ dependencies = [
 requires-dist = [
     { name = "google-cloud-aiplatform" },
     { name = "litellm" },
+    { name = "loguru" },
     { name = "openai", specifier = ">=1.99.1" },
     { name = "openai-agents" },
     { name = "pydantic" },
+    { name = "torch", marker = "extra == 'vllm'" },
+    { name = "vllm", marker = "extra == 'vllm'" },
 ]
+provides-extras = ["vllm"]
 
 [[package]]
 name = "openai"
