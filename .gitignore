@@ -12,3 +12,4 @@ software-agent-sdk
 .vscode
 
 repositories
+.cargo_cache

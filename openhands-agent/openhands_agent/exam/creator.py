@@ -3,15 +3,15 @@ from agents.items import TResponseInputItem
 from openai.types.responses.easy_input_message_param import EasyInputMessageParam
 from agents import ModelSettings
 from oai_utils.agent import AgentsSDKModel, AgentWrapper
-import tempfile
-from pathlib import Path
+
 
 from loguru import logger
 
 from openhands_agent.exam.exam import CodingExam
-from openhands_agent.exam.repository import GitRepository, TemporalCodingRepositoryError
+from openhands_agent.exam.repository import GitRepository
 from openhands_agent.exam.syllabus import LearningTopic
 from openhands_agent.runtime.rust_env import RustCodingEnvironment
+from openhands_agent.runtime.temp_workspace import TempWorkspace
 
 EXAM_CREATOR_SYSTEM_PROMPT = """You are an exam creator agent, a specialized AI assistant that can interact with a computer to generate high-fidelity coding exercises.
 
@@ -67,54 +67,50 @@ async def create_exam(
 
     The result is a git history where the "Problem" commit is the child of the "Solution" commit.
     """
-    work_dir = Path(tempfile.mkdtemp(prefix="exam_creator_"))
-    logger.info(f"Created temp workspace at {work_dir}")
+    logger.info(
+        f"Cloning template from {project_repo.local_dir} and library from {library_repo.local_dir}"
+    )
 
     try:
-        # 1. Initialize Workspace
-        # Check if the template directory is a git repository
-        if not (project_repo.local_dir / ".git").is_dir():
-            msg = (
-                f"Template directory is not a git repository: {project_repo.local_dir}"
-            )
-            logger.error(msg)
-            raise TemporalCodingRepositoryError(msg)
+        injections = {library_repo.local_dir: "repos/library"}
 
-        logger.info(f"Cloning template from {project_repo.local_dir} to {work_dir}")
-        project_repo.run_git(["clone", str(project_repo.local_dir), "."], cwd=work_dir)
+        # Use TempWorkspace context manager
+        # Note: project_repo.local_dir is the template
+        with TempWorkspace(
+            template_dir=project_repo.local_dir,
+            injections=injections,
+            prefix="exam_creator_",
+        ) as work_dir:
+            logger.info(f"Created temp workspace at {work_dir}")
 
-        workspace_repo = GitRepository(local_dir=work_dir)
-        workspace_repo.run_git(["config", "user.email", "yosemat.beta@gmail.com"])
-        workspace_repo.run_git(["config", "user.name", "yotaro-shimose"])
+            # Configure git user for the temp repo (TempWorkspace initializes git, but we set user)
+            workspace_repo = GitRepository(local_dir=work_dir)
+            workspace_repo.run_git(["config", "user.email", "yosemat.beta@gmail.com"])
+            workspace_repo.run_git(["config", "user.name", "yotaro-shimose"])
 
-        lib_dir = work_dir / "repos" / "library"
-        lib_dir.parent.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Cloning library to {lib_dir}")
-        library_repo.run_git(["clone", str(library_repo.local_dir), str(lib_dir)])
+            # Initialize Runtime (Persistent for both phases)
+            img_name = image_name or os.getenv("OPENHANDS_IMAGE_NAME", "coder-mcp")
+            async with RustCodingEnvironment(
+                workspace_dir=work_dir, image_name=img_name
+            ) as runtime:
+                # Initialize AgentWrapper with Specialized Prompt
+                agent = AgentWrapper[str].create(
+                    name="SyllabusWorker",
+                    instructions=EXAM_CREATOR_SYSTEM_PROMPT,
+                    model=model,
+                    mcp_servers=[runtime.server],
+                    model_settings=ModelSettings(
+                        tool_choice="auto", parallel_tool_calls=True
+                    ),
+                )
 
-        # Initialize Runtime (Persistent for both phases)
-        img_name = image_name or os.getenv("OPENHANDS_IMAGE_NAME", "coder-mcp")
-        async with RustCodingEnvironment(
-            workspace_dir=work_dir, image_name=img_name
-        ) as runtime:
-            # Initialize AgentWrapper with Specialized Prompt
-            agent = AgentWrapper[str].create(
-                name="SyllabusWorker",
-                instructions=EXAM_CREATOR_SYSTEM_PROMPT,
-                model=model,
-                mcp_servers=[runtime.server],
-                model_settings=ModelSettings(
-                    tool_choice="auto", parallel_tool_calls=True
-                ),
-            )
+                # Phase 1: Generate Solution
+                logger.info("Phase 1: Generating Solution...")
+                # Select the specific instruction
+                mode_extra = MODE_INSTRUCTIONS.get(topic.eval_mode, "")
 
-            # Phase 1: Generate Solution
-            logger.info("Phase 1: Generating Solution...")
-            # Select the specific instruction
-            mode_extra = MODE_INSTRUCTIONS.get(topic.eval_mode, "")
-
-            # Construct the dynamic prompt
-            solution_prompt = f"""\
+                # Construct the dynamic prompt
+                solution_prompt = f"""\
 **Role:** Senior Rust Engineer & Pedagogical Expert.
 **Context:** Creating a '{topic.eval_mode}' Gold Standard exercise for Topic: {topic.title}.
 
@@ -144,23 +140,23 @@ Read `{topic.source_reference}`. Identify target APIs: {", ".join(topic.api_surf
 - Ensure `Cargo.toml` is configured so that the library crate name is correctly defined for integration tests.
 """
 
-            res_wrapper = await agent.run(solution_prompt, max_turns=30)
-            history: list[TResponseInputItem] = res_wrapper.result.to_input_list()
+                res_wrapper = await agent.run(solution_prompt, max_turns=30)
+                history: list[TResponseInputItem] = res_wrapper.result.to_input_list()
 
-            # 3.1 Commit Solution State
-            logger.info("Committing Solution State...")
-            workspace_repo.add(".")
+                # 3.1 Commit Solution State
+                logger.info("Committing Solution State...")
+                workspace_repo.add(".")
 
-            status = workspace_repo.run_git(["status"])
-            logger.debug(f"Git Status before Solution commit:\n{status}")
+                status = workspace_repo.run_git(["status"])
+                logger.debug(f"Git Status before Solution commit:\n{status}")
 
-            workspace_repo.commit("Exam Solution: Reference Implementation")
-            solution_commit = workspace_repo.rev_parse("HEAD")
-            logger.info(f"Solution Commit: {solution_commit}")
+                workspace_repo.commit("Exam Solution: Reference Implementation")
+                solution_commit = workspace_repo.rev_parse("HEAD")
+                logger.info(f"Solution Commit: {solution_commit}")
 
-            # Phase 2: Generate Problem
-            logger.info("Phase 2: Generating Problem...")
-            problem_prompt = f"""\
+                # Phase 2: Generate Problem
+                logger.info("Phase 2: Generating Problem...")
+                problem_prompt = f"""\
 **Current Task: Strip Solution (Mode: {topic.eval_mode})**
 
 1. **Hollow Out Logic (src/)**: 
@@ -176,54 +172,57 @@ Read `{topic.source_reference}`. Identify target APIs: {", ".join(topic.api_surf
    - Run `cargo check`. It must pass (proving the interface is intact).
    {"- Run `cargo test`. They must FAIL with 'not yet implemented' errors." if topic.eval_mode == "functional" else "- (Tests skipped)."}
 """
-            # Continue the conversation by appending the new user message
-            new_message: EasyInputMessageParam = {
-                "role": "user",
-                "content": problem_prompt,
-                "type": "message",
-            }
-            # history includes the initial prompt and the agent's response(s) from Phase 1
-            await agent.run(history + [new_message], max_turns=30)
+                # Continue the conversation by appending the new user message
+                new_message: EasyInputMessageParam = {
+                    "role": "user",
+                    "content": problem_prompt,
+                    "type": "message",
+                }
+                # history includes the initial prompt and the agent's response(s) from Phase 1
+                await agent.run(history + [new_message], max_turns=30)
 
-            # 3.2 Commit Problem State
-            logger.info("Committing Problem State...")
-            workspace_repo.add(".")
+                # 3.2 Commit Problem State
+                logger.info("Committing Problem State...")
+                workspace_repo.add(".")
 
-            status = workspace_repo.run_git(["status"])
-            logger.debug(f"Git Status before Problem commit:\n{status}")
+                status = workspace_repo.run_git(["status"])
+                logger.debug(f"Git Status before Problem commit:\n{status}")
 
-            workspace_repo.commit("Exam Problem: Initial State")
-            problem_commit = workspace_repo.rev_parse("HEAD")
-            logger.info(f"Problem Commit: {problem_commit}")
+                workspace_repo.commit("Exam Problem: Initial State")
+                problem_commit = workspace_repo.rev_parse("HEAD")
+                logger.info(f"Problem Commit: {problem_commit}")
 
-            # Retrieve question and rubric content
-            question = (work_dir / "question.md").read_text()
-            rubric = (work_dir / "rubric.md").read_text()
+                # Retrieve question and rubric content
+                question = (work_dir / "question.md").read_text()
+                rubric = (work_dir / "rubric.md").read_text()
 
-            # Construct Result
-            sanitized_title = "".join(
-                c if c.isalnum() or c == "_" else "_" for c in topic.title.lower()
-            ).replace("__", "_")
-            exam_id = f"exam_{sanitized_title}_{problem_commit[:7]}"
+                # Construct Result
+                sanitized_title = "".join(
+                    c if c.isalnum() or c == "_" else "_" for c in topic.title.lower()
+                ).replace("__", "_")
+                exam_id = f"exam_{sanitized_title}_{problem_commit[:7]}"
 
-            exam = CodingExam(
-                id=exam_id,
-                image_name=image_name or os.getenv("OPENHANDS_IMAGE_NAME", "coder-mcp"),
-                project=GitRepository(local_dir=work_dir),
-                library=library_repo,
-                solution_commit=solution_commit,
-                problem_commit=problem_commit,
-                question=question,
-                eval_rubric=rubric,
-            )
+                exam = CodingExam(
+                    id=exam_id,
+                    image_name=image_name
+                    or os.getenv("OPENHANDS_IMAGE_NAME", "coder-mcp"),
+                    project=GitRepository(local_dir=work_dir),
+                    library=library_repo,
+                    solution_commit=solution_commit,
+                    problem_commit=problem_commit,
+                    question=question,
+                    eval_rubric=rubric,
+                )
 
-            # 3.3 Push to Original Repo
-            logger.info("Pushing commits to original repository...")
-            branch_name = f"exam-{exam.id}"
-            workspace_repo.run_git(["push", "origin", f"HEAD:refs/heads/{branch_name}"])
-            logger.info(f"Pushed to branch {branch_name}")
+                # 3.3 Push to Original Repo
+                logger.info("Pushing commits to original repository...")
+                branch_name = f"exam-{exam.id}"
+                workspace_repo.run_git(
+                    ["push", "origin", f"HEAD:refs/heads/{branch_name}"]
+                )
+                logger.info(f"Pushed to branch {branch_name}")
 
-            return exam
+                return exam
 
     except Exception as e:
         logger.error(f"Failed to create exam: {e}")

@@ -51,11 +51,14 @@ class BenchmarkConfig(BaseModel):
         default=1, description="Maximum number of files to generate"
     )
     exam_limit: int = Field(
-        default=2, description="Maximum number of exams to generate"
+        default=6, description="Maximum number of exams to generate"
     )
     image_name: str = Field(
         default=os.getenv("OPENHANDS_IMAGE_NAME", "coder-mcp"),
         description="Docker image to use for the MCP server",
+    )
+    max_concurrent_exams: int = Field(
+        default=3, description="Maximum number of concurrent exam generation tasks"
     )
 
     def get_project_dir(self) -> Path:
@@ -170,6 +173,7 @@ async def generate_benchmark_exams(
         exam_template=exam_template,
         work_dir=project_dir,
         image_name=config.image_name,
+        max_concurrent=config.max_concurrent_exams,
     )
 
     if exams:
@@ -182,12 +186,10 @@ async def generate_benchmark_exams(
     return exams
 
 
-# Enable tracing to see agent activity
-add_trace_processor(AgentContentPrinter())
-
-
 async def main():
     load_dotenv()
+    # Enable tracing to see agent activity
+    add_trace_processor(AgentContentPrinter())
     config = BenchmarkConfig()
     config.save()
 

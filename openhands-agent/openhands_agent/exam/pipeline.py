@@ -1,18 +1,21 @@
 import hashlib
 import os
+import subprocess
 import traceback
 from pathlib import Path
 
 from oai_utils.agent import AgentsSDKModel, AgentWrapper
-from openhands_agent.runtime.docker_runtime import DockerRuntime
-from openhands_agent.exam.repository import GitRepository
+
 from openhands_agent.exam.creator import create_exam
-from openhands_agent.exam.syllabus import (
-    RawTopics,
-    LearningTopic,
-    SYLLABUS_WORKER_PROMPT,
-)
 from openhands_agent.exam.exam import CodingExam
+from openhands_agent.exam.repository import GitRepository
+from openhands_agent.exam.syllabus import (
+    SYLLABUS_WORKER_PROMPT,
+    LearningTopic,
+    RawTopics,
+)
+from openhands_agent.runtime.docker_runtime import DockerRuntime
+from openhands_agent.async_util import gather_with_semaphore
 
 
 # --- Helpers ---
@@ -56,7 +59,6 @@ async def generate_exercises(
         lib_dir.parent.mkdir(parents=True, exist_ok=True)
         try:
             # We assume git is available in the environment
-            import subprocess
 
             subprocess.run(
                 ["git", "clone", str(library_repository.local_dir), str(lib_dir)],
@@ -151,6 +153,7 @@ async def generate_exams(
     work_dir: Path,
     image_name: str,
     push_to_origin: bool = True,
+    max_concurrent: int = 1,
 ) -> list[CodingExam]:
     """
     Phase 2: Generate CodingExams for the provided exercises.
@@ -158,12 +161,8 @@ async def generate_exams(
     specs_dir = work_dir / "exams"
     specs_dir.mkdir(parents=True, exist_ok=True)
 
-    generated_exams = []
-
-    # Iterate over exercises
-    for ex in exercises:
+    async def _create_single_exam(ex: LearningTopic) -> CodingExam | None:
         print(f"Creating exam for exercise: {ex.id} ({ex.title})")
-
         try:
             # Use exam_template as the base project_repo for exams
             exam = await create_exam(
@@ -177,7 +176,6 @@ async def generate_exams(
 
             # Save Metadata
             save_exam_metadata(exam, specs_dir)
-            generated_exams.append(exam)
 
             if push_to_origin:
                 # Push to Original Repo (origin)
@@ -190,14 +188,23 @@ async def generate_exams(
                         ["push", "origin", f"HEAD:refs/heads/{branch_name}"]
                     )
                     print(f"✅ Successfully pushed exam to branch: {branch_name}")
-
                 except Exception as push_err:
                     print(f"❌ Failed to push to origin: {push_err}")
 
+            return exam
         except Exception as exam_error:
             # Log error including traceback, then continue to the next exercise
             print(f"Failed to create exam for {ex.id}: {exam_error}")
             traceback.print_exc()
-            continue
+            return None
 
+    # Run concurrently using semaphore
+    results = await gather_with_semaphore(
+        [_create_single_exam(ex) for ex in exercises],
+        max_concurrent=max_concurrent,
+        progressbar=True,
+    )
+
+    # Filter out None results
+    generated_exams = [res for res in results if res is not None]
     return generated_exams

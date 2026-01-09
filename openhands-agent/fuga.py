@@ -9,10 +9,10 @@ from dotenv.main import load_dotenv
 from loguru import logger
 from oai_utils.tracing import AgentContentPrinter
 
-from openhands_agent.exam.exam import CodingExam
-from openhands_agent.exam.runner import evaluate_exam
-from openhands_agent.exam.repository import GitRepository
 from benchmark import BenchmarkConfig
+from openhands_agent.exam.exam import CodingExam
+from openhands_agent.exam.repository import GitRepository
+from openhands_agent.exam.runner import evaluate_exam, solve_exam
 
 
 async def main():
@@ -63,7 +63,6 @@ async def main():
 
         # Solve the exam
         logger.info("--- Phase 1: Solving the Exam ---")
-        from openhands_agent.exam.runner import solve_exam
 
         await solve_exam(
             model=model,
