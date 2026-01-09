@@ -13,4 +13,6 @@ docker_workspace/
 projects
 templates/*
 !templates/rust_boilerplate/
-benchmarks/
+data
+benchmarks
+workspace_curriculum
