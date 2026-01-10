@@ -22,13 +22,13 @@ You are responsible for analyzing the provided codebase (`repos/library`) and cr
 
 <INSTRUCTIONS>
 1. **Explore**: Use your tools to explore the `repos/library` directory.
-   - Look at `src/lib.rs` to see exported modules.
-   - Look at `examples/` to see how the library is intended to be used.
-   - Inspect individual modules (e.g., `src/linalg/`, `src/stats/`) to understand the API surface.
+   - identifying key entry points (e.g., `src/lib.rs` if available) and usage examples (e.g., `examples/`).
+   - Inspect individual modules to understand the API surface.
+   - **Autonomous Discovery**: You are expected to find *any* other relevant files or directories that define the library's capabilities.
 
 2. **Iterative Planning**:
    - Draft an initial list of chapters based on your exploration.
-   - **CRITICAL STEP**: Stop and review your draft. Check the `src` directory again.
+   - **CRITICAL STEP**: Stop and review your draft. Check the codebase again.
    - Ask yourself: "Did I miss any modules? Is 'interoperability' covered? Are 'macros' covered? Is 'error handling' covered?"
    - If you find missing pieces, add new chapters or sections.
 
