@@ -1,24 +1,28 @@
 use crate::models::{BashCommand, BashEvent, BashEventPage, BashOutput, ExecuteBashRequest};
+use crate::runtime::terminal::TerminalSession;
 use chrono::Utc;
 use glob::glob;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Stdio;
-use std::time::Duration;
-use tokio::io::AsyncReadExt;
-use tokio::process::Command;
-use tokio::time::timeout;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct BashEventService {
     pub bash_events_dir: PathBuf,
+    pub terminal_session: Arc<Mutex<TerminalSession>>,
 }
 
 impl BashEventService {
     pub fn new(bash_events_dir: PathBuf) -> Self {
         fs::create_dir_all(&bash_events_dir).expect("Failed to create bash events dir");
-        Self { bash_events_dir }
+        let terminal_session =
+            TerminalSession::new().expect("Failed to initialize terminal session");
+
+        Self {
+            bash_events_dir,
+            terminal_session: Arc::new(Mutex::new(terminal_session)),
+        }
     }
 
     fn save_event(&self, event: &BashEvent) {
@@ -74,70 +78,37 @@ impl BashEventService {
     }
 
     async fn execute_bash_command_background(&self, command: BashCommand) {
-        let mut cmd = Command::new("bash");
-        cmd.arg("-c").arg(&command.command);
-        if let Some(cwd) = &command.cwd {
-            cmd.current_dir(cwd);
-        }
-        cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::piped());
+        // We need to execute potentially blocking operations (mutex lock + sleep loop)
+        // so we use spawn_blocking to be safe, although our code is mostly sleeping.
+        // Actually, since we use `std::thread::sleep` inside `TerminalSession::execute`,
+        // it IS blocking the thread. So we MUST use spawn_blocking or rewrite execute to be async.
+        // Given the prototype was sync, I'll use spawn_blocking.
 
-        let timeout_duration = Duration::from_secs(command.timeout);
+        let terminal_session = self.terminal_session.clone();
+        let cmd_text = command.command.clone();
+        let timeout_val = command.timeout;
 
-        let mut child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                let out = BashOutput {
-                    id: Uuid::new_v4(),
-                    timestamp: Utc::now(),
-                    command_id: command.id,
-                    order: 0,
-                    exit_code: Some(-1),
-                    stdout: None,
-                    stderr: Some(format!("Failed to spawn: {}", e)),
-                };
-                self.save_event(&BashEvent::BashOutput(out));
-                return;
-            }
-        };
+        let result = tokio::task::spawn_blocking(move || {
+            let mut session = terminal_session.lock().unwrap();
+            session.execute(&cmd_text, timeout_val * 1000) // ms
+        })
+        .await;
 
-        let wait_output = async {
-            let mut stdout = String::new();
-            let mut stderr = String::new();
-            if let Some(mut out) = child.stdout.take() {
-                let _ = out.read_to_string(&mut stdout).await;
-            }
-            if let Some(mut err) = child.stderr.take() {
-                let _ = err.read_to_string(&mut stderr).await;
-            }
-            let status = child.wait().await;
-            (status, stdout, stderr)
-        };
-
-        match timeout(timeout_duration, wait_output).await {
-            Ok((status_res, stdout, stderr)) => {
-                let exit_code = status_res.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
+        match result {
+            Ok(Ok((output, exit_code))) => {
                 let out = BashOutput {
                     id: Uuid::new_v4(),
                     timestamp: Utc::now(),
                     command_id: command.id,
                     order: 0,
                     exit_code: Some(exit_code),
-                    stdout: if stdout.is_empty() {
-                        None
-                    } else {
-                        Some(stdout)
-                    },
-                    stderr: if stderr.is_empty() {
-                        None
-                    } else {
-                        Some(stderr)
-                    },
+                    stdout: Some(output),
+                    stderr: None, // We merged everything into stdout in this simple PTY model
                 };
                 self.save_event(&BashEvent::BashOutput(out));
             }
-            Err(_) => {
-                let _ = child.kill().await;
+            Ok(Err(e)) => {
+                // Error executing
                 let out = BashOutput {
                     id: Uuid::new_v4(),
                     timestamp: Utc::now(),
@@ -145,7 +116,19 @@ impl BashEventService {
                     order: 0,
                     exit_code: Some(-1),
                     stdout: None,
-                    stderr: Some("Command timed out".to_string()),
+                    stderr: Some(format!("Error executing command: {}", e)),
+                };
+                self.save_event(&BashEvent::BashOutput(out));
+            }
+            Err(join_err) => {
+                let out = BashOutput {
+                    id: Uuid::new_v4(),
+                    timestamp: Utc::now(),
+                    command_id: command.id,
+                    order: 0,
+                    exit_code: Some(-1),
+                    stdout: None,
+                    stderr: Some(format!("Task execution panicked: {}", join_err)),
                 };
                 self.save_event(&BashEvent::BashOutput(out));
             }
@@ -187,5 +170,46 @@ impl BashEventService {
             items: events,
             next_page_id: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn test_bash_event_service_execution() {
+        let dir = tempdir().unwrap();
+        let service = BashEventService::new(dir.path().to_path_buf());
+
+        let req = ExecuteBashRequest {
+            command: "echo test_bash_service".to_string(),
+            cwd: None,
+            timeout: Some(5),
+        };
+
+        let cmd = service.start_bash_command(req);
+
+        // Wait for execution
+        let mut attempts = 0;
+        let mut found_output = false;
+
+        while attempts < 20 {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let page = service.search_bash_events(Some(cmd.id));
+            if let Some(last) = page.items.last() {
+                if let BashEvent::BashOutput(out) = last {
+                    found_output = true;
+                    assert_eq!(out.exit_code, Some(0));
+                    assert!(out.stdout.as_ref().unwrap().contains("test_bash_service"));
+                    break;
+                }
+            }
+            attempts += 1;
+        }
+
+        assert!(found_output, "Did not find bash output");
     }
 }
