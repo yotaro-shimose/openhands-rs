@@ -1,11 +1,10 @@
 import os
-from agents.items import TResponseInputItem
-from openai.types.responses.easy_input_message_param import EasyInputMessageParam
+
 from agents import ModelSettings
-from oai_utils.agent import AgentsSDKModel, AgentWrapper
-
-
+from agents.items import TResponseInputItem
 from loguru import logger
+from oai_utils.agent import AgentsSDKModel, AgentWrapper
+from openai.types.responses.easy_input_message_param import EasyInputMessageParam
 
 from openhands_agent.exam.exam import CodingExam
 from openhands_agent.exam.repository import GitRepository
@@ -80,6 +79,7 @@ async def create_exam(
             template_dir=project_repo.local_dir,
             injections=injections,
             prefix="exam_creator_",
+            copy_method="clone",
         ) as work_dir:
             logger.info(f"Created temp workspace at {work_dir}")
 
@@ -150,6 +150,9 @@ Read `{topic.source_reference}`. Identify target APIs: {", ".join(topic.api_surf
                 status = workspace_repo.run_git(["status"])
                 logger.debug(f"Git Status before Solution commit:\n{status}")
 
+                if not workspace_repo.run_git(["status", "--porcelain"]):
+                    raise RuntimeError("Agent failed to produce solution changes")
+
                 workspace_repo.commit("Exam Solution: Reference Implementation")
                 solution_commit = workspace_repo.rev_parse("HEAD")
                 logger.info(f"Solution Commit: {solution_commit}")
@@ -187,6 +190,9 @@ Read `{topic.source_reference}`. Identify target APIs: {", ".join(topic.api_surf
 
                 status = workspace_repo.run_git(["status"])
                 logger.debug(f"Git Status before Problem commit:\n{status}")
+
+                if not workspace_repo.run_git(["status", "--porcelain"]):
+                    raise RuntimeError("Agent failed to produce problem changes")
 
                 workspace_repo.commit("Exam Problem: Initial State")
                 problem_commit = workspace_repo.rev_parse("HEAD")

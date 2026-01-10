@@ -1,8 +1,8 @@
-import tempfile
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Dict, Optional
 
 
 class TempWorkspace:
@@ -11,16 +11,19 @@ class TempWorkspace:
         template_dir: Path,
         injections: Optional[Dict[Path, str]] = None,
         prefix: str = "workspace_",
+        copy_method: str = "copy",
     ):
         """
         Args:
             template_dir: The source directory to copy as the base template.
             injections: A dictionary mapping source paths (absolute) to destination paths RELATIVE to the workspace root.
             prefix: Prefix for the temporary directory.
+            copy_method: Method to copy the template. "copy" (default) or "clone".
         """
         self.template_dir = template_dir
         self.injections = injections or {}
         self.prefix = prefix
+        self.copy_method = copy_method
         self.temp_dir: Optional[Path] = None
 
     def __enter__(self) -> Path:
@@ -28,8 +31,27 @@ class TempWorkspace:
         self.temp_dir = Path(tempfile.mkdtemp(prefix=self.prefix))
 
         # 2. Copy Template
+        # 2. Copy Template or Clone
         if self.template_dir.exists():
-            shutil.copytree(self.template_dir, self.temp_dir, dirs_exist_ok=True)
+            if self.copy_method == "clone":
+                # Use git clone to preserve origin
+                try:
+                    subprocess.run(
+                        ["git", "clone", str(self.template_dir), str(self.temp_dir)],
+                        check=True,
+                        capture_output=True,
+                    )
+                except subprocess.CalledProcessError as e:
+                    # Fallback to copy if clone fails (e.g. not a git repo)
+                    print(f"Git clone failed: {e}. Falling back to copy.")
+                    if self.temp_dir.exists():
+                        shutil.rmtree(self.temp_dir)
+                    self.temp_dir.mkdir()
+                    shutil.copytree(
+                        self.template_dir, self.temp_dir, dirs_exist_ok=True
+                    )
+            else:
+                shutil.copytree(self.template_dir, self.temp_dir, dirs_exist_ok=True)
 
         # 3. Injections
         for src, dest_rel in self.injections.items():
