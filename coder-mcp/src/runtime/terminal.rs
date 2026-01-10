@@ -61,8 +61,9 @@ impl TerminalSession {
                         is_alive_clone.store(false, Ordering::Relaxed);
                         break;
                     }
-                    Err(_) => {
+                    Err(e) => {
                         // Error
+                        eprintln!("Terminal background reader error: {}", e);
                         is_alive_clone.store(false, Ordering::Relaxed);
                         break;
                     }
