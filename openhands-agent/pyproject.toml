@@ -19,8 +19,13 @@ test = [
     "pytest-asyncio>=0.24.0",
 ]
 
+[tool.uv.workspace]
+members = [
+    "oai_utils",
+]
+
 [tool.uv.sources]
-oai-utils = { path = "oai_utils", editable = true }
+oai-utils = { workspace = true, editable = true }
 
 [tool.pyrefly]
 search-path = ["./oai_utils"]

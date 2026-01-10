@@ -1,12 +1,16 @@
 import asyncio
-import json
 import os
+import shutil
 from pathlib import Path
 
 from agents import ModelSettings
 from agents.extensions.models.litellm_model import LitellmModel
+from agents.items import TResponseInputItem
+from agents.tracing import add_trace_processor
 from dotenv.main import load_dotenv
 from oai_utils.agent import AgentWrapper
+from oai_utils.conversion import contents2params
+from oai_utils.tracing import AgentContentPrinter
 from pydantic import BaseModel, Field
 
 from openhands_agent.runtime.rust_env import RustCodingEnvironment
@@ -21,44 +25,68 @@ You are responsible for analyzing the provided codebase (`repos/library`) and cr
 </ROLE>
 
 <INSTRUCTIONS>
-1. **Explore**: Use your tools to explore the `repos/library` directory.
-   - identifying key entry points (e.g., `src/lib.rs` if available) and usage examples (e.g., `examples/`).
-   - Inspect individual modules to understand the API surface.
-   - **Autonomous Discovery**: You are expected to find *any* other relevant files or directories that define the library's capabilities.
+**Iterative Explorative Planning**:
+Engage in a continuous cycle of exploration and planning. You are not expected to fully explore before planning, nor plan without exploration.
+Instead, let the codebase reveal itself to you. Navigate through the files (source code, examples, documentation, etc.) to understand the library's full scope.
 
-2. **Iterative Planning**:
-   - Draft an initial list of chapters based on your exploration.
-   - **CRITICAL STEP**: Stop and review your draft. Check the codebase again.
-   - Ask yourself: "Did I miss any modules? Is 'interoperability' covered? Are 'macros' covered? Is 'error handling' covered?"
-   - If you find missing pieces, add new chapters or sections.
+As you explore, iteratively construct and refine your curriculum plan. If you find a new module or concept, update your plan to ensure it is covered. Conversely, use your evolving plan to direct your exploration into specific areas of the codebase.
 
-3. **Plan**: Create a file named `curriculum_plan.md` in the current directory.
+**Goal**:
+Ensure your final plan is comprehensive, covering all major features, modules, and patterns found in the library (e.g., core data structures, algorithms, error handling, interoperability, etc.).
+
+**Output**:
+Create a file named `curriculum_plan.md` in the current directory.
    - The plan should be a hierarchical table of contents (Chapters and Sections).
    - For each chapter, briefly explain what existing code/modules it covers.
-   - Group related topics logically (e.g., "Linear Algebra", "Statistics", "Optimization", "Interoperability").
-   - Ensure NO major feature of the library is left behind.
+   - Group related topics logically.
 </INSTRUCTIONS>
 """
 
 # Prompt to parse the markdown plan into a machine-readable JSON list of chapters
+# Prompt to parse the markdown plan into a machine-readable JSON list of chapters
 PLAN_PARSER_PROMPT = """You are a helper agent. 
 Read the file `curriculum_plan.md`. 
 Extract the list of chapters defined in the plan.
-Output a pure JSON list of objects, where each object has:
+Output a JSON object with a list of chapters, where each chapter has:
 - `chapter_number`: int
 - `title`: str (e.g., "Core Concepts")
 - `filename`: str (e.g., "01_core_concepts.md")
 - `description`: str (A summary of what to cover based on the plan)
 
 Example Output:
-[
-  {"chapter_number": 1, "title": "Introduction", "filename": "01_introduction.md", "description": "Cover installation and basics..."},
-  ...
-]
+{
+  "chapters": [
+    {"chapter_number": 1, "title": "Introduction", "filename": "01_introduction.md", "description": "Cover installation and basics..."},
+    ...
+  ]
+}
 
 <IMPORTANT>
-Output ONLY the JSON. No markdown formatting, no backticks.
+Output ONLY the structured data.
 </IMPORTANT>
+"""
+
+CURRICULUM_EVALUATOR_PROMPT = """You are a rigorous Curriculum Evaluator.
+Your goal is to ensure the generated 'curriculum_plan.md' is truly comprehensive.
+
+<INPUT>
+1. `curriculum_plan.md`: The proposed textbook plan.
+2. `repos/library`: The actual source code of the library.
+</INPUT>
+
+<INSTRUCTIONS>
+1. **Analyze the Codebase**: Explore the `repos/library/src` directory. Look for modules, structs, and significant features.
+2. **Cross-Reference**: Check if each significant feature found in the code is covered by a Chapter or Section in the plan.
+3. **Identify Gaps**: specifically look for:
+    - Missing top-level modules (e.g. `src/financial` vs "Financial Math" chapter).
+    - Missing advanced features (e.g. `src/cluster.rs` vs "Clustering").
+    - Missing interoperability features (e.g. `python` feature flags).
+4. **Evaluate**:
+    - If SIGNIFICANT items are missing, set `is_comprehensive` to False and provide detailed `feedback` listing the specific missing files/modules and where they should logically fit.
+    - If the plan is good and covers >95% of the codebase, set `is_comprehensive` to True and `feedback` to "Plan looks great."
+
+<CRITICAL>
+</CRITICAL>
 """
 
 CONTENT_WRITER_PROMPT_TEMPLATE = """You are an expert Rust Technical Writer.
@@ -82,6 +110,28 @@ Referece the following scope from the curriculum plan:
 4. **Formatting**: Use standard Markdown. key terms in bold. Code blocks with `rust`.
 </GUIDELINES>
 """
+
+
+class Chapter(BaseModel):
+    chapter_number: int = Field(description="The chapter number")
+    title: str = Field(description="Title of the chapter")
+    filename: str = Field(description="Filename for the chapter (e.g., '01_intro.md')")
+    description: str = Field(
+        description="Detailed description of what to cover in this chapter"
+    )
+
+
+class CurriculumPlan(BaseModel):
+    chapters: list[Chapter] = Field(description="List of chapters in the curriculum")
+
+
+class EvaluationResult(BaseModel):
+    is_comprehensive: bool = Field(
+        description="True if the plan covers all major library modules, False if items are missing"
+    )
+    feedback: str = Field(
+        description="Detailed feedback on what is missing. Empty if comprehensive."
+    )
 
 
 class CurriculumConfig(BaseModel):
@@ -128,8 +178,82 @@ class CurriculumConfig(BaseModel):
         return cls.model_validate_json(input_path.read_text())
 
 
+async def generate_curriculum_plan(
+    workspace_dir: Path, model: LitellmModel, runtime: RustCodingEnvironment
+) -> Path:
+    plan_path = workspace_dir / "curriculum_plan.md"
+
+    if plan_path.exists():
+        print(f"\n--- Phase 1: Plan found at {plan_path}, skipping generation ---")
+        return plan_path
+
+    print("\n--- Phase 1: Generating Curriculum Plan (Iterative Loop) ---")
+
+    # 1. Generator Agent
+    architect_agent = AgentWrapper.create(
+        name="CurriculumArchitect",
+        instructions=CURRICULUM_ARCHITECT_PROMPT,
+        model=model,
+        mcp_servers=[runtime.server],
+        model_settings=ModelSettings(tool_choice="auto", parallel_tool_calls=True),
+    )
+
+    # 2. Evaluator Agent
+    evaluator_agent = AgentWrapper[EvaluationResult].create(
+        name="CurriculumEvaluator",
+        instructions=CURRICULUM_EVALUATOR_PROMPT,
+        model=model,
+        mcp_servers=[runtime.server],
+        output_type=EvaluationResult,
+        model_settings=ModelSettings(tool_choice="auto", parallel_tool_calls=True),
+    )
+
+    max_iterations = 3
+    current_feedback = ""
+    chat_history: list[TResponseInputItem] = []
+
+    for i in range(max_iterations):
+        print(f"\n[Iteration {i + 1}/{max_iterations}] Generating Plan...")
+
+        # Run Generator
+        if current_feedback:
+            prompt = (
+                "The previous plan was critiqued. Please update `curriculum_plan.md` "
+                f"addressing this feedback:\n\n{current_feedback}\n\n"
+                "Ensure you actually cover these missing modules."
+            )
+        else:
+            prompt = "Generate `curriculum_plan.md` by exploring the `repos/library`."
+        chat_history.extend(contents2params("user", [prompt]))
+        ret = await architect_agent.run(chat_history, max_turns=30)
+        chat_history.extend(ret.result.to_input_list())
+
+        if not plan_path.exists():
+            print("❌ Generator failed to create curriculum_plan.md")
+            continue
+
+        # Run Evaluator
+        print(f"\n[Iteration {i + 1}/{max_iterations}] Evaluating Plan...")
+        eval_result = await evaluator_agent.run(
+            "Compare `curriculum_plan.md` against `repos/library` and evaluate comprehensiveness.",
+            max_turns=50,
+        )
+
+        result = eval_result.result.final_output
+        if result.is_comprehensive:
+            print("✅ Plan deemed comprehensive by Evaluator.")
+            break
+
+        print(f"⚠️ Plan gap detected: {result.feedback}")
+        current_feedback = result.feedback
+
+    return plan_path
+
+
 async def main():
     load_dotenv()
+    add_trace_processor(AgentContentPrinter())
+
     config = CurriculumConfig()
     config.save()
 
@@ -169,7 +293,6 @@ async def main():
     lib_repo_dir = workspace_dir / "repos" / "library"
     if not lib_repo_dir.exists():
         print("Cloning/Copying library to workspace...")
-        import shutil
 
         shutil.copytree(library_path, lib_repo_dir, dirs_exist_ok=True)
 
@@ -178,30 +301,16 @@ async def main():
         workspace_dir=workspace_dir, image_name=config.image_name
     ) as runtime:
         # --- PHASE 1: PLANNING ---
-        plan_path = workspace_dir / "curriculum_plan.md"
-
-        if not plan_path.exists():
-            print("\n--- Phase 1: Generating Curriculum Plan ---")
-            architect_agent = AgentWrapper.create(
-                name="CurriculumArchitect",
-                instructions=CURRICULUM_ARCHITECT_PROMPT,
-                model=model,
-                mcp_servers=[runtime.server],
-                model_settings=ModelSettings(
-                    tool_choice="auto", parallel_tool_calls=True
-                ),
-            )
-            await architect_agent.run("Generate curriculum_plan.md", max_turns=30)
-        else:
-            print("\n--- Phase 1: Plan already exists, skipping generation ---")
+        plan_path = await generate_curriculum_plan(workspace_dir, model, runtime)
 
         # --- PHASE 1.5: PARSING PLAN ---
         print("\n--- Phase 1.5: Parsing Plan ---")
-        parser_agent = AgentWrapper.create(
+        parser_agent = AgentWrapper[CurriculumPlan].create(
             name="PlanParser",
             instructions=PLAN_PARSER_PROMPT,
             model=model,
             mcp_servers=[runtime.server],
+            output_type=CurriculumPlan,
         )
 
         parse_result = await parser_agent.run(
@@ -209,10 +318,16 @@ async def main():
         )
 
         try:
-            raw_json = parse_result.result.final_output
-            # Cleanup potential markdown ticks if the model ignored instructions
-            clean_json = raw_json.replace("```json", "").replace("```", "").strip()
-            chapters = json.loads(clean_json)
+            plan_obj = parse_result.result.final_output
+            chapters = [
+                {
+                    "chapter_number": c.chapter_number,
+                    "title": c.title,
+                    "filename": c.filename,
+                    "description": c.description,
+                }
+                for c in plan_obj.chapters
+            ]
             print(f"Parsed {len(chapters)} chapters.")
         except Exception as e:
             print(f"Failed to parse plan JSON: {e}")
