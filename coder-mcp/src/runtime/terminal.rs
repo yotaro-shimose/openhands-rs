@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 const CMD_END_MARKER: &str = ">>DONE<<";
 const INIT_MARKER: &str = ">>INIT_DONE<<";
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Mimics the Agent's view of a terminal session
 pub struct TerminalSession {
@@ -76,7 +77,7 @@ impl TerminalSession {
         // Wait for handshake
         let start = Instant::now();
         loop {
-            if start.elapsed() > Duration::from_secs(5) {
+            if start.elapsed() > HANDSHAKE_TIMEOUT {
                 return Err(anyhow::anyhow!(
                     "Failed to initialize terminal: timeout waiting for handshake"
                 ));
