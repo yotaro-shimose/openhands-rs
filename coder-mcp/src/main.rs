@@ -24,12 +24,13 @@ async fn main() {
 
     let cwd = env::current_dir().unwrap();
 
-    let bash_service = BashEventService::new(cwd.join("bash_events"));
-
     // Use WORKSPACE_DIR env var if set, otherwise default to current_dir/workspace
     let workspace_path = env::var("WORKSPACE_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| cwd.join("workspace"));
+
+    let bash_service = BashEventService::new(cwd.join("bash_events"), Some(workspace_path.clone()));
+
     // Create the MCP service
     let coder_mcp_service = CoderMcpService::new(bash_service, workspace_path);
 

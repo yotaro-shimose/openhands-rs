@@ -14,10 +14,10 @@ pub struct BashEventService {
 }
 
 impl BashEventService {
-    pub fn new(bash_events_dir: PathBuf) -> Self {
+    pub fn new(bash_events_dir: PathBuf, workdir: Option<PathBuf>) -> Self {
         fs::create_dir_all(&bash_events_dir).expect("Failed to create bash events dir");
         let terminal_session =
-            TerminalSession::new().expect("Failed to initialize terminal session");
+            TerminalSession::new(workdir).expect("Failed to initialize terminal session");
 
         Self {
             bash_events_dir,
@@ -176,7 +176,7 @@ mod tests {
     #[tokio::test]
     async fn test_bash_event_service_execution() {
         let dir = tempdir().unwrap();
-        let service = BashEventService::new(dir.path().to_path_buf());
+        let service = BashEventService::new(dir.path().to_path_buf(), None);
 
         let req = ExecuteBashRequest {
             command: "echo test_bash_service".to_string(),

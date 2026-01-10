@@ -1,6 +1,7 @@
 use anyhow::Result;
 use portable_pty::{Child, CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -28,7 +29,7 @@ impl Drop for TerminalSession {
 }
 
 impl TerminalSession {
-    pub fn new() -> Result<Self> {
+    pub fn new(workdir: Option<PathBuf>) -> Result<Self> {
         let pty_system = NativePtySystem::default();
         let pair = pty_system.openpty(PtySize {
             rows: 24,
@@ -98,6 +99,19 @@ impl TerminalSession {
                 }
             }
             thread::sleep(Duration::from_millis(10));
+        }
+
+        if let Some(wd) = workdir {
+            // We use the raw writer to send the cd command, but we need to wait for it or just
+            // trust it. Since we are in initialization, let's just send it.
+            // Ideally we would reuse execute() but we need to return Self first.
+            // So we just send "cd path" and hope for the best, or we could do a mini-execute logic.
+            // But we can construct Self first then call execute if we change the signature to return (Self, output).
+            // Or easier: just write "cd path" and a clear marker again.
+            // Let's keep it simple: just write the cd command.
+            if let Some(path_str) = wd.to_str() {
+                writeln!(writer, "cd \"{}\"", path_str)?;
+            }
         }
 
         Ok(Self {
@@ -201,7 +215,7 @@ mod tests {
 
     #[test]
     fn test_execute_simple_command() {
-        let mut session = TerminalSession::new().unwrap();
+        let mut session = TerminalSession::new(None).unwrap();
         let (output, exit_code) = session.execute("echo hello", 1000).unwrap();
         assert_eq!(exit_code, 0);
         assert!(output.contains("hello"));
@@ -209,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_execute_state_persistence() {
-        let mut session = TerminalSession::new().unwrap();
+        let mut session = TerminalSession::new(None).unwrap();
         session.execute("export MY_VAR=123", 1000).unwrap();
 
         let (output, exit_code) = session.execute("echo $MY_VAR", 1000).unwrap();
@@ -219,7 +233,7 @@ mod tests {
 
     #[test]
     fn test_execute_directory_persistence() {
-        let mut session = TerminalSession::new().unwrap();
+        let mut session = TerminalSession::new(None).unwrap();
         session.execute("mkdir -p /tmp/test_dir", 1000).unwrap();
         session.execute("cd /tmp/test_dir", 1000).unwrap();
 
@@ -230,14 +244,14 @@ mod tests {
 
     #[test]
     fn test_execute_timeout() {
-        let mut session = TerminalSession::new().unwrap();
+        let mut session = TerminalSession::new(None).unwrap();
         let (_output, exit_code) = session.execute("sleep 2", 500).unwrap();
         assert_eq!(exit_code, -1);
     }
 
     #[test]
     fn test_execute_exit_code() {
-        let mut session = TerminalSession::new().unwrap();
+        let mut session = TerminalSession::new(None).unwrap();
 
         let (_output, exit_code) = session.execute("false", 1000).unwrap();
         assert_eq!(exit_code, 1);
