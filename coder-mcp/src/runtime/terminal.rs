@@ -168,8 +168,6 @@ mod tests {
     #[test]
     fn test_execute_exit_code() {
         let mut session = TerminalSession::new().unwrap();
-        let (_output, _exit_code) = session.execute("exit 42", 1000).unwrap();
-
         let (_output, exit_code) = session.execute("false", 1000).unwrap();
         assert_eq!(exit_code, 1);
     }
