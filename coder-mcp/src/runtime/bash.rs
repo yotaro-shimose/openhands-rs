@@ -78,12 +78,6 @@ impl BashEventService {
     }
 
     async fn execute_bash_command_background(&self, command: BashCommand) {
-        // We need to execute potentially blocking operations (mutex lock + sleep loop)
-        // so we use spawn_blocking to be safe, although our code is mostly sleeping.
-        // Actually, since we use `std::thread::sleep` inside `TerminalSession::execute`,
-        // it IS blocking the thread. So we MUST use spawn_blocking or rewrite execute to be async.
-        // Given the prototype was sync, I'll use spawn_blocking.
-
         let terminal_session = self.terminal_session.clone();
         let cmd_text = command.command.clone();
         let timeout_val = command.timeout;
