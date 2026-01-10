@@ -29,9 +29,6 @@ class BenchmarkConfig(BaseModel):
         default=Path("projects/test_numrs_syllabus2"),
         description="Working directory for projects",
     )
-    template_name: str = Field(
-        default="exam_template", description="Name of the exam template repository"
-    )
     template_dir: Path = Field(
         default=Path("templates/rust_exam_template"),
         description="Local directory of the project-specific exam template",
@@ -39,9 +36,6 @@ class BenchmarkConfig(BaseModel):
     master_boilerplate_dir: Path = Field(
         default=Path("templates/rust_boilerplate"),
         description="Source boilerplate for new project templates",
-    )
-    repository_name: str = Field(
-        default="numrs", description="Name of the source repository"
     )
     repository_path: Path = Field(
         default=Path("repositories/numrs"),
