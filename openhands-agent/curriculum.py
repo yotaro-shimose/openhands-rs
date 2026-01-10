@@ -3,10 +3,11 @@ import json
 import os
 from pathlib import Path
 
-
 from agents import ModelSettings
 from agents.extensions.models.litellm_model import LitellmModel
+from dotenv.main import load_dotenv
 from oai_utils.agent import AgentWrapper
+from pydantic import BaseModel, Field
 
 from openhands_agent.runtime.rust_env import RustCodingEnvironment
 
@@ -25,7 +26,13 @@ You are responsible for analyzing the provided codebase (`repos/library`) and cr
    - Look at `examples/` to see how the library is intended to be used.
    - Inspect individual modules (e.g., `src/linalg/`, `src/stats/`) to understand the API surface.
 
-2. **Plan**: Create a file named `curriculum_plan.md` in the current directory.
+2. **Iterative Planning**:
+   - Draft an initial list of chapters based on your exploration.
+   - **CRITICAL STEP**: Stop and review your draft. Check the `src` directory again.
+   - Ask yourself: "Did I miss any modules? Is 'interoperability' covered? Are 'macros' covered? Is 'error handling' covered?"
+   - If you find missing pieces, add new chapters or sections.
+
+3. **Plan**: Create a file named `curriculum_plan.md` in the current directory.
    - The plan should be a hierarchical table of contents (Chapters and Sections).
    - For each chapter, briefly explain what existing code/modules it covers.
    - Group related topics logically (e.g., "Linear Algebra", "Statistics", "Optimization", "Interoperability").
@@ -77,29 +84,81 @@ Referece the following scope from the curriculum plan:
 """
 
 
+class CurriculumConfig(BaseModel):
+    curriculum_id: str = Field(
+        default="generated_curriculum", description="Unique ID for this curriculum run"
+    )
+    model_name: str = Field(
+        default="gemini/gemini-3-flash-preview", description="LLM model name"
+    )
+    workspace_dir: Path = Field(
+        default=Path("workspace_curriculum2"),
+        description="Working directory for curriculum generation",
+    )
+    repository_path: Path = Field(
+        default=Path("repositories/numrs"),
+        description="Local path to the source repository",
+    )
+    image_name: str = Field(
+        default=os.getenv("OPENHANDS_IMAGE_NAME", "coder-mcp"),
+        description="Docker image to use for the MCP server",
+    )
+
+    def get_workspace_dir(self) -> Path:
+        """Resolve config workspace path relative to this script's location if not absolute."""
+        return self.workspace_dir.resolve()
+
+    def get_repository_path(self) -> Path:
+        return self.repository_path.resolve()
+
+    def save(self):
+        """Save the curriculum config to a JSON file."""
+        output_dir = Path("curriculums")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"{self.curriculum_id}.json"
+        output_path.write_text(self.model_dump_json(indent=2))
+        print(f"✅ Curriculum config saved to {output_path}")
+
+    @classmethod
+    def load(cls, curriculum_id: str) -> "CurriculumConfig":
+        """Load a CurriculumConfig by ID."""
+        input_path = Path("curriculums") / f"{curriculum_id}.json"
+        if not input_path.exists():
+            raise FileNotFoundError(f"Config not found at {input_path}")
+        return cls.model_validate_json(input_path.read_text())
+
+
 async def main():
+    load_dotenv()
+    config = CurriculumConfig()
+    config.save()
+
     # Configuration
-    model_name = "gemini/gemini-3-flash-preview"
     api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         print("Error: GOOGLE_API_KEY environment variable not set.")
         return
 
     # Paths
+    # To keep backward compatibility with how the path was found relative to the script:
     script_path = Path(__file__).resolve()
     openhands_agent_dir = script_path.parent
-    project_root = openhands_agent_dir.parent
-    library_path = project_root / "repositories" / "numrs"
-    if not library_path.exists():
-        library_path = openhands_agent_dir / "repositories" / "numrs"
 
-    workspace_dir = openhands_agent_dir / "workspace_curriculum"
+    # Logic to find the repo if the default relative path doesn't work
+    library_path = config.get_repository_path()
+    if not library_path.exists():
+        # Fallback to checking relative to openhands_agent directory as in original code
+        fallback_path = openhands_agent_dir / config.repository_path
+        if fallback_path.exists():
+            library_path = fallback_path
+
+    workspace_dir = config.get_workspace_dir()
     curriculum_out_dir = workspace_dir / "curriculum"
 
     # Initialize Model
-    model = LitellmModel(model=model_name, api_key=api_key)
+    model = LitellmModel(model=config.model_name, api_key=api_key)
 
-    print(f"Initializing Curriculum Agent with model: {model_name}")
+    print(f"Initializing Curriculum Agent with model: {config.model_name}")
     print(f"Library Path: {library_path}")
     print(f"Workspace: {workspace_dir}")
 
@@ -114,11 +173,9 @@ async def main():
 
         shutil.copytree(library_path, lib_repo_dir, dirs_exist_ok=True)
 
-    image_name = os.getenv("OPENHANDS_IMAGE_NAME", "coder-mcp")
-
     # Start Environment
     async with RustCodingEnvironment(
-        workspace_dir=workspace_dir, image_name=image_name
+        workspace_dir=workspace_dir, image_name=config.image_name
     ) as runtime:
         # --- PHASE 1: PLANNING ---
         plan_path = workspace_dir / "curriculum_plan.md"
@@ -145,8 +202,6 @@ async def main():
             instructions=PLAN_PARSER_PROMPT,
             model=model,
             mcp_servers=[runtime.server],
-            # Force text output mostly, tool use not strictly needed but good for reading file
-            model_settings=ModelSettings(tool_choice="auto"),
         )
 
         parse_result = await parser_agent.run(
