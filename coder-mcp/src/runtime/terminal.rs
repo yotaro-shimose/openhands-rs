@@ -260,4 +260,45 @@ mod tests {
         let (_output, exit_code) = session.execute("false", 1000).unwrap();
         assert_eq!(exit_code, 1);
     }
+
+    #[test]
+    fn test_execute_large_output() {
+        let mut session = TerminalSession::new(None).unwrap();
+        // seq 1 10000 generates roughly 48KB of text
+        let (output, exit_code) = session.execute("seq 1 10000", 5000).unwrap();
+        assert_eq!(exit_code, 0);
+        // PTY often converts newlines to CRLF
+        assert!(output.starts_with("1\r\n") || output.starts_with("1\n"));
+        assert!(output.contains("10000"));
+        // Check approximate length to ensure we didn't drop huge chunks
+        assert!(output.len() > 40000);
+    }
+
+    #[test]
+    fn test_concurrent_sessions() {
+        let mut handles = vec![];
+        for i in 0..5 {
+            handles.push(thread::spawn(move || {
+                let mut session = TerminalSession::new(None).unwrap();
+                let (output, exit_code) = session
+                    .execute(&format!("echo thread {}", i), 1000)
+                    .unwrap();
+                assert_eq!(exit_code, 0);
+                assert!(output.contains(&format!("thread {}", i)));
+            }));
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn test_interrupt_exit_code() {
+        let mut session = TerminalSession::new(None).unwrap();
+        // sh -c 'kill -TERM $$' causes the subshell to die with signal 15 (TERM).
+        // Bash reports this as 128 + 15 = 143.
+        let (_output, exit_code) = session.execute("sh -c 'kill -TERM $$'", 1000).unwrap();
+        assert_eq!(exit_code, 143);
+    }
 }
