@@ -96,18 +96,6 @@ impl CoderMcpService {
         Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 
-    #[tool(
-        name = "terminal",
-        description = "Execute shell commands. Wraps execute_bash."
-    )]
-    async fn terminal(
-        &self,
-        Parameters(args): Parameters<ExecuteBashArgs>,
-    ) -> Result<CallToolResult, McpError> {
-        // Reuse execute_bash logic
-        self.execute_bash(Parameters(args)).await
-    }
-
     #[tool(name = "execute_bash", description = "Execute a bash command")]
     async fn execute_bash(
         &self,

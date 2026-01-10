@@ -154,7 +154,14 @@ impl BashEventService {
 
     pub fn search_bash_events(&self, command_id: Option<Uuid>) -> BashEventPage {
         let mut events = Vec::new();
-        let full_pattern = self.bash_events_dir.join("*");
+
+        let pattern = if let Some(cid) = command_id {
+            format!("*{}*", cid.simple())
+        } else {
+            "*".to_string()
+        };
+
+        let full_pattern = self.bash_events_dir.join(pattern);
 
         if let Ok(entries) = glob(full_pattern.to_str().unwrap_or("")) {
             for entry in entries.filter_map(Result::ok) {
