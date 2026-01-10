@@ -1,19 +1,29 @@
 use anyhow::Result;
-use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+use portable_pty::{Child, CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 const CMD_END_MARKER: &str = ">>DONE<<";
+const INIT_MARKER: &str = ">>INIT_DONE<<";
 
 /// Mimics the Agent's view of a terminal session
 pub struct TerminalSession {
     writer: Box<dyn Write + Send>,
-    // The shared buffer contains ALL output ever received
+    // The shared buffer contains output since last read
     output_buffer: Arc<Mutex<String>>,
-    // We track where we last read to return incremental output
-    last_read_len: usize,
+    // Keep child process to kill it on drop
+    child: Box<dyn Child + Send>,
+    // Status of the background reader
+    is_alive: Arc<AtomicBool>,
+}
+
+impl Drop for TerminalSession {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+    }
 }
 
 impl TerminalSession {
@@ -27,12 +37,14 @@ impl TerminalSession {
         })?;
 
         let cmd = CommandBuilder::new("bash");
-        let _child = pair.slave.spawn_command(cmd)?;
+        let child = pair.slave.spawn_command(cmd)?;
 
         let mut writer = pair.master.take_writer()?;
         let mut reader = pair.master.try_clone_reader()?;
         let output_buffer = Arc::new(Mutex::new(String::new()));
         let buffer_clone = output_buffer.clone();
+        let is_alive = Arc::new(AtomicBool::new(true));
+        let is_alive_clone = is_alive.clone();
 
         thread::spawn(move || {
             let mut buf = [0u8; 1024];
@@ -43,29 +55,63 @@ impl TerminalSession {
                         let mut locked = buffer_clone.lock().unwrap();
                         locked.push_str(&s);
                     }
-                    Ok(_) => break,  // EOF
-                    Err(_) => break, // Error
+                    Ok(_) => {
+                        // EOF
+                        is_alive_clone.store(false, Ordering::Relaxed);
+                        break;
+                    }
+                    Err(_) => {
+                        // Error
+                        is_alive_clone.store(false, Ordering::Relaxed);
+                        break;
+                    }
                 }
             }
         });
 
         writeln!(writer, "stty -echo")?;
+        // Handshake to ensure shell is ready
+        writeln!(writer, "echo \"{}\"", INIT_MARKER)?;
 
-        thread::sleep(Duration::from_millis(200));
-
-        {
-            let mut locked = output_buffer.lock().unwrap();
-            *locked = String::new();
+        // Wait for handshake
+        let start = Instant::now();
+        loop {
+            if start.elapsed() > Duration::from_secs(5) {
+                return Err(anyhow::anyhow!(
+                    "Failed to initialize terminal: timeout waiting for handshake"
+                ));
+            }
+            if !is_alive.load(Ordering::Relaxed) {
+                return Err(anyhow::anyhow!(
+                    "Failed to initialize terminal: background thread exited"
+                ));
+            }
+            {
+                let mut locked = output_buffer.lock().unwrap();
+                if let Some(idx) = locked.find(INIT_MARKER) {
+                    if locked[idx..].contains('\n') {
+                        *locked = String::new();
+                        break;
+                    }
+                }
+            }
+            thread::sleep(Duration::from_millis(10));
         }
 
         Ok(Self {
             writer,
             output_buffer,
-            last_read_len: 0,
+            child,
+            is_alive,
         })
     }
 
     pub fn execute(&mut self, cmd: &str, timeout_ms: u64) -> Result<(String, i32)> {
+        // Check health
+        if !self.is_alive.load(Ordering::Relaxed) {
+            return Err(anyhow::anyhow!("Terminal session is dead"));
+        }
+
         let marker_cmd = format!("{}; echo \"{}:$?\"", cmd, CMD_END_MARKER);
 
         writeln!(self.writer, "{}", marker_cmd)?;
@@ -75,25 +121,48 @@ impl TerminalSession {
 
         loop {
             if start.elapsed() > duration {
-                return Ok((self.read_new_output(), -1));
+                return Ok((self.drain_output(), -1));
+            }
+            if !self.is_alive.load(Ordering::Relaxed) {
+                return Err(anyhow::anyhow!(
+                    "Terminal background thread died during execution"
+                ));
             }
 
+            let mut found = false;
             {
                 let locked = self.output_buffer.lock().unwrap();
                 let full_content = &*locked;
-                let new_segment = &full_content[self.last_read_len..];
-
-                if let Some(idx) = new_segment.find(CMD_END_MARKER) {
-                    if new_segment[idx..].contains('\n') {
-                        break;
+                // Scan all occurrences of marker
+                for (idx, _) in full_content.match_indices(CMD_END_MARKER) {
+                    let after_marker = &full_content[idx + CMD_END_MARKER.len()..];
+                    // Expect immediate ':'
+                    if after_marker.starts_with(':') {
+                        let after_colon = &after_marker[1..];
+                        // Check if it starts with digit or -
+                        if let Some(first_char) = after_colon.trim_start().chars().next() {
+                            if first_char.is_digit(10) || first_char == '-' {
+                                // Has digits. Check if we have a newline after digits to ensure parsing is safe
+                                if after_colon.contains('\n') {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
+            }
+            if found {
+                break;
             }
 
             thread::sleep(Duration::from_millis(50));
         }
 
-        let output = self.read_new_output();
+        let output = self.drain_output();
+
+        // DEBUG PRINT
+        // println!("DEBUG: cmd='{}' output='{:?}'", cmd, output);
 
         if let Some(pos) = output.rfind(CMD_END_MARKER) {
             let marker_part = &output[pos..];
@@ -116,12 +185,11 @@ impl TerminalSession {
         Ok((output, -1))
     }
 
-    fn read_new_output(&mut self) -> String {
-        let locked = self.output_buffer.lock().unwrap();
-        let current_len = locked.len();
-        let new_content = locked[self.last_read_len..current_len].to_string();
-        self.last_read_len = current_len;
-        new_content
+    fn drain_output(&mut self) -> String {
+        let mut locked = self.output_buffer.lock().unwrap();
+        let current_content = locked.clone();
+        *locked = String::new();
+        current_content
     }
 }
 
@@ -168,6 +236,7 @@ mod tests {
     #[test]
     fn test_execute_exit_code() {
         let mut session = TerminalSession::new().unwrap();
+
         let (_output, exit_code) = session.execute("false", 1000).unwrap();
         assert_eq!(exit_code, 1);
     }
