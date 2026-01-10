@@ -7,9 +7,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const CMD_END_MARKER: &str = ">>DONE<<";
 const INIT_MARKER: &str = ">>INIT_DONE<<";
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+const OSC_CMD_FINISHED_PREFIX: &str = "\x1b]133;D;";
+const OSC_PROMPT_START: &str = "\x1b]133;A\x07";
 
 /// Mimics the Agent's view of a terminal session
 pub struct TerminalSession {
@@ -38,7 +39,15 @@ impl TerminalSession {
             pixel_height: 0,
         })?;
 
-        let cmd = CommandBuilder::new("bash");
+        let mut cmd = CommandBuilder::new("bash");
+
+        // We set CWD here. We do NOT set PS1/PROMPT_COMMAND here because .bashrc
+        // will likely override them. We set them via the writer below.
+
+        if let Some(wd) = workdir {
+            cmd.cwd(wd);
+        }
+
         let child = pair.slave.spawn_command(cmd)?;
 
         let mut writer = pair.master.take_writer()?;
@@ -63,7 +72,6 @@ impl TerminalSession {
                         break;
                     }
                     Err(e) => {
-                        // Error
                         eprintln!("Terminal background reader error: {}", e);
                         is_alive_clone.store(false, Ordering::Relaxed);
                         break;
@@ -72,16 +80,44 @@ impl TerminalSession {
             }
         });
 
+        // Initialize shell
+        // 1. Disable echo to avoid double output
         writeln!(writer, "stty -echo")?;
-        // Handshake to ensure shell is ready
-        writeln!(writer, "echo \"{}\"", INIT_MARKER)?;
+        // 2. Disable bracketed paste
+        writeln!(writer, "bind 'set enable-bracketed-paste off'")?;
+
+        // 3. Configure OSC 133 Semantic Prompts
+        // We do this here ensures it overrides .bashrc
+        // D;<code>: Command finished with exit code
+        // A: Prompt start
+        // Note: We need careful escaping for the printf string inside the export.
+        // PROMPT_COMMAND='printf "\033]133;D;%s\007" $?'
+        // PS1='\[\033]133;A\007\]'
+        writeln!(
+            writer,
+            "export PROMPT_COMMAND='printf \"\\033]133;D;%s\\007\" $?'"
+        )?;
+        writeln!(writer, "export PS1='\\[\\033]133;A\\007\\]'")?;
+
+        // 4. Handshake
+        // We use a specific marker output that won't be confused with the command echo.
+        // We need to wait for the prompt to appear properly configured.
+        let handshake_cmd = format!("echo \"{}\"", INIT_MARKER);
+        writeln!(writer, "{}", handshake_cmd)?;
 
         // Wait for handshake
         let start = Instant::now();
         loop {
             if start.elapsed() > HANDSHAKE_TIMEOUT {
+                let locked = output_buffer.lock().unwrap();
+                let content_sample = if locked.len() > 200 {
+                    &locked[locked.len() - 200..]
+                } else {
+                    &locked
+                };
                 return Err(anyhow::anyhow!(
-                    "Failed to initialize terminal: timeout waiting for handshake"
+                    "Failed to initialize terminal: timeout waiting for handshake. Buffer (last 200 chars): {:?}",
+                    content_sample
                 ));
             }
             if !is_alive.load(Ordering::Relaxed) {
@@ -91,27 +127,19 @@ impl TerminalSession {
             }
             {
                 let mut locked = output_buffer.lock().unwrap();
+                // Check if we found the marker.
                 if let Some(idx) = locked.find(INIT_MARKER) {
-                    if locked[idx..].contains('\n') {
+                    // Check if we have seen the semantic prompt marker "OSC 133;A" AFTER the Init marker
+                    let after = &locked[idx + INIT_MARKER.len()..];
+                    if after.contains(OSC_PROMPT_START) {
+                        // Found it.
+                        // Clear buffer to be clean for next command
                         *locked = String::new();
                         break;
                     }
                 }
             }
             thread::sleep(Duration::from_millis(10));
-        }
-
-        if let Some(wd) = workdir {
-            // We use the raw writer to send the cd command, but we need to wait for it or just
-            // trust it. Since we are in initialization, let's just send it.
-            // Ideally we would reuse execute() but we need to return Self first.
-            // So we just send "cd path" and hope for the best, or we could do a mini-execute logic.
-            // But we can construct Self first then call execute if we change the signature to return (Self, output).
-            // Or easier: just write "cd path" and a clear marker again.
-            // Let's keep it simple: just write the cd command.
-            if let Some(path_str) = wd.to_str() {
-                writeln!(writer, "cd \"{}\"", path_str)?;
-            }
         }
 
         Ok(Self {
@@ -128,9 +156,8 @@ impl TerminalSession {
             return Err(anyhow::anyhow!("Terminal session is dead"));
         }
 
-        let marker_cmd = format!("{}; echo \"{}:$?\"", cmd, CMD_END_MARKER);
-
-        writeln!(self.writer, "{}", marker_cmd)?;
+        // Just write the command. bash will handle the rest via PROMPT_COMMAND.
+        writeln!(self.writer, "{}", cmd)?;
 
         let start = Instant::now();
         let duration = Duration::from_millis(timeout_ms);
@@ -145,57 +172,34 @@ impl TerminalSession {
                 ));
             }
 
-            let mut found = false;
             {
                 let locked = self.output_buffer.lock().unwrap();
-                let full_content = &*locked;
-                // Scan all occurrences of marker
-                for (idx, _) in full_content.match_indices(CMD_END_MARKER) {
-                    let after_marker = &full_content[idx + CMD_END_MARKER.len()..];
-                    // Expect immediate ':'
-                    if after_marker.starts_with(':') {
-                        let after_colon = &after_marker[1..];
-                        // Check if it starts with digit or -
-                        if let Some(first_char) = after_colon.trim_start().chars().next() {
-                            if first_char.is_digit(10) || first_char == '-' {
-                                // Has digits. Check if we have a newline after digits to ensure parsing is safe
-                                if after_colon.contains('\n') {
-                                    found = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
+                // Look for OSC 133;D;<code>\x07
+                if locked.contains(OSC_CMD_FINISHED_PREFIX) {
+                    break;
                 }
             }
-            if found {
-                break;
-            }
 
-            thread::sleep(Duration::from_millis(50));
+            thread::sleep(Duration::from_millis(10));
         }
 
         let output = self.drain_output();
 
-        // DEBUG PRINT
-        // println!("DEBUG: cmd='{}' output='{:?}'", cmd, output);
+        // Parse exit code from OSC 133;D;<code>\x07
+        // There might be multiple if user somehow chained commands, but we take the last one.
+        // Note: The marker is printed *after* the command output.
+        // We probably want to remove the marker and everything after it (the prompt) from the returned output.
 
-        if let Some(pos) = output.rfind(CMD_END_MARKER) {
-            let marker_part = &output[pos..];
-            let clean_marker = marker_part.trim();
-            let parts: Vec<&str> = clean_marker.split(':').collect();
-            let exit_code = if parts.len() >= 2 {
-                let dig: String = parts[1]
-                    .chars()
-                    .take_while(|c| c.is_digit(10) || *c == '-')
-                    .collect();
-                dig.parse().unwrap_or(-1)
-            } else {
-                -1
-            };
+        if let Some(pos) = output.rfind(OSC_CMD_FINISHED_PREFIX) {
+            let after_marker = &output[pos + OSC_CMD_FINISHED_PREFIX.len()..];
+            if let Some(end_pos) = after_marker.find('\x07') {
+                let code_str = &after_marker[..end_pos];
+                let exit_code = code_str.parse().unwrap_or(-1);
 
-            let actual_output = &output[..pos];
-            return Ok((actual_output.trim_end().to_string(), exit_code));
+                // The output is everything BEFORE the marker
+                let actual_output = &output[..pos];
+                return Ok((actual_output.trim_end().to_string(), exit_code));
+            }
         }
 
         Ok((output, -1))
