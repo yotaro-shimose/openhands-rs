@@ -316,16 +316,8 @@ async def main():
         )
 
         try:
-            plan_obj = parse_result.result.final_output
-            chapters = [
-                {
-                    "chapter_number": c.chapter_number,
-                    "title": c.title,
-                    "filename": c.filename,
-                    "description": c.description,
-                }
-                for c in plan_obj.chapters
-            ]
+            plan_obj = parse_result.final_output()
+            chapters = plan_obj.chapters
             print(f"Parsed {len(chapters)} chapters.")
         except Exception as e:
             print(f"Failed to parse plan JSON: {e}")
@@ -336,10 +328,10 @@ async def main():
         print("\n--- Phase 2: Writing Content ---")
 
         for chapter in chapters:
-            ch_num = chapter["chapter_number"]
-            title = chapter["title"]
-            filename = chapter["filename"]
-            desc = chapter["description"]
+            ch_num = chapter.chapter_number
+            title = chapter.title
+            filename = chapter.filename
+            desc = chapter.description
 
             target_file = curriculum_out_dir / filename
             if target_file.exists():
