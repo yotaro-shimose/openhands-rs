@@ -197,7 +197,12 @@ mod tests {
                 if let BashEvent::BashOutput(out) = last {
                     found_output = true;
                     assert_eq!(out.exit_code, Some(0));
-                    assert!(out.stdout.as_ref().unwrap().contains("test_bash_service"));
+                    let output = out.stdout.as_ref().unwrap();
+                    assert!(
+                        output.contains("test_bash_service"),
+                        "Output did not contain expected string. Got: '{}'",
+                        output
+                    );
                     break;
                 }
             }

@@ -1,16 +1,11 @@
-mod logger;
-mod models;
-mod runtime;
-mod service;
-mod tools;
-
 use axum::Router;
+use coder_mcp::logger;
+use coder_mcp::runtime::bash::BashEventService;
+use coder_mcp::service::CoderMcpService;
 use rmcp::transport::{
     streamable_http_server::{session::local::LocalSessionManager, tower::StreamableHttpService},
     StreamableHttpServerConfig,
 };
-use runtime::bash::BashEventService;
-use service::CoderMcpService;
 use std::env;
 use std::path::PathBuf;
 use tokio::net::TcpListener;
