@@ -15,5 +15,5 @@ templates/*
 !templates/rust_boilerplate/
 data
 benchmarks
-workspace_curriculum
+workspace_curriculum*
 curriculums

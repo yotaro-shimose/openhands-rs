@@ -1,11 +1,12 @@
 import asyncio
 import os
 import shutil
+from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
+from typing import List, Literal
 
-from agents import ModelSettings
 from agents.extensions.models.litellm_model import LitellmModel
-from agents.items import TResponseInputItem
 from agents.tracing import add_trace_processor
 from dotenv.main import load_dotenv
 from oai_utils.agent import AgentWrapper
@@ -13,239 +14,364 @@ from oai_utils.conversion import contents2params
 from oai_utils.tracing import AgentContentPrinter
 from pydantic import BaseModel, Field
 
+from openhands_agent.exam.repository import chmod_recursive
 from openhands_agent.runtime.rust_env import RustCodingEnvironment
 
 # --- PROMPTS ---
 
-CURRICULUM_ARCHITECT_PROMPT = """You are an expert Technical Curriculum Architect and Rust Developer.
-Your goal is to design a comprehensive educational curriculum (textbook) for the 'numrs' Rust library.
-
-<ROLE>
-You are responsible for analyzing the provided codebase (`repos/library`) and creating a high-level curriculum plan.
-</ROLE>
-
-<INSTRUCTIONS>
-**Iterative Explorative Planning**:
-Engage in a continuous cycle of exploration and planning. You are not expected to fully explore before planning, nor plan without exploration.
-Instead, let the codebase reveal itself to you. Navigate through the files (source code, examples, documentation, etc.) to understand the library's full scope.
-
-As you explore, iteratively construct and refine your curriculum plan. If you find a new module or concept, update your plan to ensure it is covered. Conversely, use your evolving plan to direct your exploration into specific areas of the codebase.
-
-**Goal**:
-Ensure your final plan is comprehensive, covering all major features, modules, and patterns found in the library (e.g., core data structures, algorithms, error handling, interoperability, etc.).
-
-**Output**:
-Create a file named `curriculum_plan.md` in the current directory.
-   - The plan should be a hierarchical table of contents (Chapters and Sections).
-   - For each chapter, briefly explain what existing code/modules it covers.
-   - Group related topics logically.
-</INSTRUCTIONS>
-"""
-
-PLAN_PARSER_PROMPT = """You are a helper agent. 
-Read the file `curriculum_plan.md`. 
-Extract the list of chapters defined in the plan.
-Output a JSON object with a list of chapters, where each chapter has:
-- `chapter_number`: int
-- `title`: str (e.g., "Core Concepts")
-- `filename`: str (e.g., "01_core_concepts.md")
-- `description`: str (A summary of what to cover based on the plan)
-
-Example Output:
-{
-  "chapters": [
-    {"chapter_number": 1, "title": "Introduction", "filename": "01_introduction.md", "description": "Cover installation and basics..."},
-    ...
-  ]
-}
-
-<IMPORTANT>
-Output ONLY the structured data.
-</IMPORTANT>
-"""
-
-CURRICULUM_EVALUATOR_PROMPT = """You are a rigorous Curriculum Evaluator.
-Your goal is to ensure the generated 'curriculum_plan.md' is truly comprehensive.
+EXPLORER_PROMPT = """You are an expert Rust Researcher and Curriculum Architect.
+Your goal is to explore the provided Rust library and generate a **Comprehensive Summary** for a specific topic.
 
 <INPUT>
-1. `curriculum_plan.md`: The proposed textbook plan.
-2. `repos/library`: The actual source code of the library.
+- **Task Instruction**: {instruction}
+- **Scope**: The directory or concept you are assigned to.
+- **Library Path**: /workspace/repos/library
+- **Working Directory**: {work_dir}
 </INPUT>
 
 <INSTRUCTIONS>
-1. **Analyze the Codebase**: Explore the `repos/library/src` directory. Look for modules, structs, and significant features.
-2. **Cross-Reference**: Check if each significant feature found in the code is covered by a Chapter or Section in the plan.
-3. **Identify Gaps**: specifically look for:
-    - Missing top-level modules (e.g. `src/financial` vs "Financial Math" chapter).
-    - Missing advanced features (e.g. `src/cluster.rs` vs "Clustering").
-    - Missing interoperability features (e.g. `python` feature flags).
-4. **Evaluate**:
-    - If SIGNIFICANT items are missing, set `is_comprehensive` to False and provide detailed `feedback` listing the specific missing files/modules and where they should logically fit.
-    - If the plan is good and covers >95% of the codebase, set `is_comprehensive` to True and `feedback` to "Plan looks great."
-
-<CRITICAL>
-</CRITICAL>
+1. **Explore**:
+   - thoroughly read the relevant code in `/workspace/repos/library`.
+   - Look for modules, structs, traits, and functions related to your assigned instruction.
+   - You can look at `README.md`, `examples/`, and tests.
+2. **Summarize**:
+   - Create a detailed summary named `comprehensive_summary.md` in your Working Directory.
+   - This summary must explicitly list the API surface, key concepts, and usage patterns relevant to your task.
+   - It serves as the "knowledge base" for deciding how to teach this topic.
+</INSTRUCTIONS>
 """
 
-CONTENT_WRITER_PROMPT_TEMPLATE = """You are an expert Rust Technical Writer.
-Your task is to write **Chapter {chapter_number}: {title}** for the NumRS2 curriculum.
+EVALUATOR_PROMPT = """You are a rigorous Curriculum Auditor.
+Your job is to verify that the `comprehensive_summary.md` is truly comprehensive and accurate regarding the codebase.
 
-<CONTEXT>
-We are writing a comprehensive textbook for the `numrs` library.
-You have access to the full source code in `repos/library`.
-</CONTEXT>
+<INPUT>
+1. `comprehensive_summary.md`: The draft summary.
+2. `/workspace/repos/library`: The actual source code.
+</INPUT>
 
-<GOAL>
-Write a high-quality, detailed markdown file named `{filename}`.
-Referece the following scope from the curriculum plan:
-{description}
-</GOAL>
-
-<GUIDELINES>
-1. **Accuracy**: You MUST verify your code snippets. Check the actual source code in `repos/library` to ensure function signatures and module paths are correct.
-2. **Examples**: Include runnable code snippets. Use `assert_eq!` or `println!` to show results.
-3. **Style**: Use clear, educational language. Explain *why* things work the way they do (e.g., memory layout, broadcasting rules).
-4. **Formatting**: Use standard Markdown. key terms in bold. Code blocks with `rust`.
-</GUIDELINES>
+<INSTRUCTIONS>
+1. **Verify**: Check if the summary misses any public structs, enums, or functions that are relevant to the topic.
+2. **Evaluate**:
+   - If significant concepts are missing or incorrect, set `is_comprehensive` to False and provide specific `feedback`.
+   - If the summary is excellent (covers >95% of the relevant scope), set `is_comprehensive` to True.
+</INSTRUCTIONS>
 """
 
+DISPATCHER_PROMPT = """You are a Curriculum Manager.
+Your goal is to decide how to process the current task based on the `comprehensive_summary.md`.
 
-class Chapter(BaseModel):
-    chapter_number: int = Field(description="The chapter number")
-    title: str = Field(description="Title of the chapter")
-    filename: str = Field(description="Filename for the chapter (e.g., '01_intro.md')")
-    description: str = Field(
-        description="Detailed description of what to cover in this chapter"
-    )
+<INPUT>
+- **Instruction**: {instruction}
+- **Summary**: `comprehensive_summary.md`
+</INPUT>
 
+<DECISION_LOGIC>
+Determine if the scope described in the summary is small enough to be a **Single Leaf File** (e.g., a single concept, struct, or small module) or if it is too complex and requires **Splitting** into sub-tasks.
 
-class CurriculumPlan(BaseModel):
-    chapters: list[Chapter] = Field(description="List of chapters in the curriculum")
+- **Split (Delegate)**:
+  - If the topic covers multiple distinct sub-modules or concepts that deserve their own chapters/sections.
+  - Create a list of sub-tasks. Each sub-task needs a directory name and a specific instruction.
+  
+- **Write (Leaf)**:
+  - If the topic is atomic enough to be explained in one cohesive markdown file (e.g., 200-1000 lines of text/code).
+  - You will simply signal to write the content.
+</DECISION_LOGIC>
+"""
+
+WRITER_PROMPT = """You are an expert Rust Technical Writer.
+Your goal is to write a high-quality educational markdown file for the current topic.
+
+<INPUT>
+- **Instruction**: {instruction}
+- **Summary**: `comprehensive_summary.md`
+</INPUT>
+
+<INSTRUCTIONS>
+1. Write a file named `content.md` (or a more descriptive name if appropriate, e.g., `01_intro.md`) in the current directory.
+2. The content should be a textbook-style explanation.
+3. **Include**:
+   - Explanations of concepts.
+   - Runnable Rust code snippets (verify against the library).
+   - Expected output.
+   - Best practices.
+</INSTRUCTIONS>
+"""
+
+# --- MODELS ---
 
 
 class EvaluationResult(BaseModel):
-    is_comprehensive: bool = Field(
-        description="True if the plan covers all major library modules, False if items are missing"
+    is_comprehensive: bool = Field(description="Is the summary comprehensive?")
+    feedback: str = Field(description="Feedback if not comprehensive.")
+
+
+class SubTask(BaseModel):
+    directory_name: str = Field(
+        description="Name of the subdirectory for this sub-task (e.g. '01_parser')"
     )
-    feedback: str = Field(
-        description="Detailed feedback on what is missing. Empty if comprehensive."
+    instruction: str = Field(description="Specific instruction for the sub-agent.")
+
+
+class DecisionResult(BaseModel):
+    action: Literal["split", "write"] = Field(
+        description="Action to take: 'split' or 'write'"
+    )
+    sub_tasks: List[SubTask] | None = Field(
+        default=None, description="List of sub-tasks if action is 'split'"
+    )
+    final_file_name: str | None = Field(
+        default=None, description="Name of the final file if action is 'write'"
     )
 
 
 class CurriculumConfig(BaseModel):
-    curriculum_id: str = Field(
-        default="generated_curriculum", description="Unique ID for this curriculum run"
-    )
-    model_name: str = Field(
-        default="gemini/gemini-3-flash-preview", description="LLM model name"
-    )
-    workspace_dir: Path = Field(
-        default=Path("workspace_curriculum2"),
-        description="Working directory for curriculum generation",
-    )
-    repository_path: Path = Field(
-        default=Path("repositories/numrs"),
-        description="Local path to the source repository",
-    )
-    image_name: str = Field(
-        default=os.getenv("OPENHANDS_IMAGE_NAME", "coder-mcp"),
-        description="Docker image to use for the MCP server",
-    )
+    curriculum_id: str = Field(default="generated_textbook")
+    model_name: str = Field(default="gemini/gemini-3-flash-preview")
+    workspace_dir: Path = Field(default=Path("workspace_curriculum2"))
+    repository_path: Path = Field(default=Path("repositories/numrs"))
+    max_concurrency: int = Field(default=2)
 
     def get_workspace_dir(self) -> Path:
-        """Resolve config workspace path relative to this script's location if not absolute."""
         return self.workspace_dir.resolve()
 
-    def get_repository_path(self) -> Path:
-        return self.repository_path.resolve()
 
-    def save(self):
-        """Save the curriculum config to a JSON file."""
-        output_dir = Path("curriculums")
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"{self.curriculum_id}.json"
-        output_path.write_text(self.model_dump_json(indent=2))
-        print(f"✅ Curriculum config saved to {output_path}")
-
-    @classmethod
-    def load(cls, curriculum_id: str) -> "CurriculumConfig":
-        """Load a CurriculumConfig by ID."""
-        input_path = Path("curriculums") / f"{curriculum_id}.json"
-        if not input_path.exists():
-            raise FileNotFoundError(f"Config not found at {input_path}")
-        return cls.model_validate_json(input_path.read_text())
+@dataclass
+class TaskQueueItem:
+    instruction: str
+    work_dir: Path
+    depth: int
 
 
-async def generate_curriculum_plan(
-    workspace_dir: Path, model: LitellmModel, runtime: RustCodingEnvironment
-) -> Path:
-    plan_path = workspace_dir / "curriculum_plan.md"
+# --- AGENT CLASSES ---
 
-    if plan_path.exists():
-        print(f"\n--- Phase 1: Plan found at {plan_path}, skipping generation ---")
-        return plan_path
 
-    print("\n--- Phase 1: Generating Curriculum Plan (Iterative Loop) ---")
+class CurriculumAgent:
+    def __init__(
+        self,
+        config: CurriculumConfig,
+        model: LitellmModel,
+        runtime: RustCodingEnvironment,
+        semaphore: asyncio.Semaphore,
+    ):
+        self.config = config
+        self.model = model
+        self.runtime = runtime
+        self.semaphore = semaphore
 
-    # 1. Generator Agent
-    architect_agent = AgentWrapper.create(
-        name="CurriculumArchitect",
-        instructions=CURRICULUM_ARCHITECT_PROMPT,
-        model=model,
-        mcp_servers=[runtime.server],
-        model_settings=ModelSettings(tool_choice="auto", parallel_tool_calls=True),
-    )
+    def _to_container_path(self, path: Path) -> Path:
+        """Convert a host path to a path inside the container (assuming /workspace mount)."""
+        try:
+            rel = path.relative_to(self.config.get_workspace_dir())
+            return Path("/workspace") / rel
+        except ValueError:
+            return path
 
-    # 2. Evaluator Agent
-    evaluator_agent = AgentWrapper[EvaluationResult].create(
-        name="CurriculumEvaluator",
-        instructions=CURRICULUM_EVALUATOR_PROMPT,
-        model=model,
-        mcp_servers=[runtime.server],
-        output_type=EvaluationResult,
-        model_settings=ModelSettings(tool_choice="auto", parallel_tool_calls=True),
-    )
+    async def run_queue(self, root_task: TaskQueueItem):
+        queue = deque([root_task])
+        running_tasks = set()
 
-    max_iterations = 3
-    current_feedback = ""
-    chat_history: list[TResponseInputItem] = []
+        # Loop until no tasks are left in queue AND no tasks are currently running
+        while queue or running_tasks:
+            while queue and len(running_tasks) < self.config.max_concurrency:
+                task = queue.pop()  # LIFO (Stack) -> DFS behavior
 
-    for i in range(max_iterations):
-        print(f"\n[Iteration {i + 1}/{max_iterations}] Generating Plan...")
+                # Create a task wrapper to handle the result
+                fut = asyncio.create_task(self.process_single_task(task))
+                running_tasks.add(fut)
 
-        # Run Generator
-        if current_feedback:
-            prompt = (
-                "The previous plan was critiqued. Please update `curriculum_plan.md` "
-                f"addressing this feedback:\n\n{current_feedback}\n\n"
-                "Ensure you actually cover these missing modules."
+            if not running_tasks:
+                break
+
+            # Wait for any task to complete
+            done, pending = await asyncio.wait(
+                running_tasks, return_when=asyncio.FIRST_COMPLETED
             )
-        else:
-            prompt = "Generate `curriculum_plan.md` by exploring the `repos/library`."
-        chat_history.extend(contents2params("user", [prompt]))
-        ret = await architect_agent.run(chat_history, max_turns=30)
-        chat_history.extend(ret.result.to_input_list())
 
-        if not plan_path.exists():
-            print("❌ Generator failed to create curriculum_plan.md")
-            continue
+            for fut in done:
+                running_tasks.remove(fut)
+                try:
+                    # Result is a tuple: (DecisionResult, TaskQueueItem)
+                    # or None if failed/leaf
+                    decision, parent_task = await fut
 
-        # Run Evaluator
-        print(f"\n[Iteration {i + 1}/{max_iterations}] Evaluating Plan...")
-        eval_result = await evaluator_agent.run(
-            "Compare `curriculum_plan.md` against `repos/library` and evaluate comprehensiveness.",
-            max_turns=50,
+                    if decision and decision.action == "split" and decision.sub_tasks:
+                        print(
+                            f"[{parent_task.depth}] Splitting into {len(decision.sub_tasks)} sub-tasks."
+                        )
+                        # Add subtasks to stack (reverse order to pop first one first? or just extend)
+                        # ensure DFS: children of just-finished task are processed next.
+                        # Since we use `pop()` (from right/end), we should `extend` (add to right/end).
+                        # Order: subtask 0 .. N.
+                        # If we extend([T0, T1]), queue is [...old, T0, T1].
+                        # pop() gives T1, then T0. So we execute T1 first.
+                        # Standard DFS visits children in order?
+                        # If we want to process T0 first, we should extend([T1, T0]).
+                        # But it doesn't strictly matter for curriculum generation.
+
+                        new_items = []
+                        for sub in decision.sub_tasks:
+                            sub_dir = parent_task.work_dir / sub.directory_name
+                            new_items.append(
+                                TaskQueueItem(
+                                    instruction=sub.instruction,
+                                    work_dir=sub_dir,
+                                    depth=parent_task.depth + 1,
+                                )
+                            )
+
+                        # Add to queue (Stack)
+                        queue.extend(new_items)
+
+                except Exception as e:
+                    print(f"Task failed with error: {e}")
+                    # In a real system we might log this or retry.
+
+    async def process_single_task(self, task: TaskQueueItem):
+        """Processes a single node. Returns (DecisionResult, task) so the loop can enqueue children."""
+        print(f"\n[{task.depth}] Processing Task in {task.work_dir.name}...")
+        task.work_dir.mkdir(parents=True, exist_ok=True)
+        chmod_recursive(task.work_dir)
+
+        instruction_file = task.work_dir / "instruction.md"
+        instruction_file.write_text(task.instruction)
+        chmod_recursive(instruction_file)
+
+        container_work_dir = self._to_container_path(task.work_dir)
+
+        async with self.semaphore:
+            # 1. Explore
+            await self._phase_explore(
+                task.instruction, task.work_dir, container_work_dir
+            )
+
+            # 2. Decide
+            decision = await self._phase_decide(
+                task.instruction, task.work_dir, container_work_dir
+            )
+
+            # 3. Act (Write Phase Only)
+            if decision.action == "write":
+                print(f"[{task.depth}] Writing leaf content.")
+                await self._phase_write(
+                    task.instruction,
+                    task.work_dir,
+                    container_work_dir,
+                    decision.final_file_name or "content.md",
+                )
+                return (decision, task)
+
+            elif decision.action == "split":
+                # Don't recurse here. Just return the decision.
+                return (decision, task)
+
+        return (None, task)
+
+    async def _phase_explore(
+        self, instruction: str, work_dir: Path, container_work_dir: Path
+    ):
+        print("  > Exploring...")
+
+        prompt = EXPLORER_PROMPT.format(
+            instruction=instruction, work_dir=container_work_dir
         )
 
-        result = eval_result.result.final_output
-        if result.is_comprehensive:
-            print("✅ Plan deemed comprehensive by Evaluator.")
-            break
+        # Generator - Evaluator Loop
+        max_retries = 3
+        current_feedback = ""
 
-        print(f"⚠️ Plan gap detected: {result.feedback}")
-        current_feedback = result.feedback
+        explorer_history = []
 
-    return plan_path
+        explorer = AgentWrapper.create(
+            name=f"Explorer-{work_dir.name}",
+            instructions=prompt,
+            model=self.model,
+            mcp_servers=[self.runtime.server],
+        )
+
+        for i in range(max_retries):
+            # 1. Generate
+            user_msg = f"Generate comprehensive_summary.md in {container_work_dir}. "
+            if current_feedback:
+                user_msg += f"Critique feedback: {current_feedback}"
+
+            explorer_history.extend(contents2params("user", [user_msg]))
+            resp = await explorer.run(explorer_history, max_turns=50)
+            explorer_history.extend(resp.result.to_input_list())
+
+            summary_file = work_dir / "comprehensive_summary.md"
+            if not summary_file.exists():
+                print(f"  ❌ Summary generation failed in {work_dir}")
+                # Retry if failure
+                continue
+
+            # 2. Evaluate
+            evaluator = AgentWrapper[EvaluationResult].create(
+                name=f"Evaluator-{work_dir.name}",
+                instructions=EVALUATOR_PROMPT,
+                model=self.model,
+                mcp_servers=[self.runtime.server],
+                output_type=EvaluationResult,
+            )
+
+            summary_container_path = container_work_dir / "comprehensive_summary.md"
+
+            eval_resp = await evaluator.run(
+                f"Evaluate {summary_container_path} against /workspace/repos/library",
+                max_turns=40,
+            )
+            result = eval_resp.result.final_output
+
+            if result.is_comprehensive:
+                print(f"  ✅ Summary verified for {work_dir.name}")
+                break
+
+            current_feedback = result.feedback
+            print(f"  ⚠️ Summary critique: {current_feedback[:50]}...")
+
+    async def _phase_decide(
+        self, instruction: str, work_dir: Path, container_work_dir: Path
+    ) -> DecisionResult:
+        print("  > Deciding...")
+        prompt = DISPATCHER_PROMPT.format(instruction=instruction)
+
+        dispatcher = AgentWrapper[DecisionResult].create(
+            name=f"Dispatcher-{work_dir.name}",
+            instructions=prompt,
+            model=self.model,
+            mcp_servers=[self.runtime.server],
+            output_type=DecisionResult,
+        )
+
+        summary_path = container_work_dir / "comprehensive_summary.md"
+
+        resp = await dispatcher.run(
+            f"Read {summary_path} and decide. Instruction: {instruction}", max_turns=20
+        )
+        return resp.result.final_output
+
+    async def _phase_write(
+        self, instruction: str, work_dir: Path, container_work_dir: Path, filename: str
+    ):
+        print("  > Writing Content...")
+        prompt = WRITER_PROMPT.format(instruction=instruction)
+
+        writer = AgentWrapper.create(
+            name=f"Writer-{work_dir.name}",
+            instructions=prompt,
+            model=self.model,
+            mcp_servers=[self.runtime.server],
+        )
+
+        output_path = container_work_dir / filename
+        summary_path = container_work_dir / "comprehensive_summary.md"
+
+        await writer.run(
+            f"Write the final content to {output_path}. Use {summary_path} as source.",
+            max_turns=20,
+        )
+
+
+# --- MAIN ---
 
 
 async def main():
@@ -253,7 +379,6 @@ async def main():
     add_trace_processor(AgentContentPrinter())
 
     config = CurriculumConfig()
-    config.save()
 
     # Configuration
     api_key = os.environ.get("GOOGLE_API_KEY")
@@ -262,111 +387,57 @@ async def main():
         return
 
     # Paths
-    # To keep backward compatibility with how the path was found relative to the script:
-    script_path = Path(__file__).resolve()
-    openhands_agent_dir = script_path.parent
-
-    # Logic to find the repo if the default relative path doesn't work
-    library_path = config.get_repository_path()
+    library_path = config.repository_path.resolve()
     if not library_path.exists():
-        # Fallback to checking relative to openhands_agent directory as in original code
-        fallback_path = openhands_agent_dir / config.repository_path
-        if fallback_path.exists():
-            library_path = fallback_path
+        # try relative to script
+        library_path = Path(__file__).parent / config.repository_path
 
     workspace_dir = config.get_workspace_dir()
-    curriculum_out_dir = workspace_dir / "curriculum"
 
     # Initialize Model
     model = LitellmModel(model=config.model_name, api_key=api_key)
 
-    print(f"Initializing Curriculum Agent with model: {config.model_name}")
-    print(f"Library Path: {library_path}")
+    print(f"Initializing Queue-based Curriculum Agent with model: {config.model_name}")
+    print(f"Library: {library_path}")
     print(f"Workspace: {workspace_dir}")
 
-    # Prepare Workspace (Clone library into it)
+    # Prepare Workspace (clean start)
+    if workspace_dir.exists():
+        shutil.rmtree(workspace_dir)
     workspace_dir.mkdir(parents=True, exist_ok=True)
-    curriculum_out_dir.mkdir(parents=True, exist_ok=True)
+    chmod_recursive(workspace_dir)
 
     lib_repo_dir = workspace_dir / "repos" / "library"
-    if not lib_repo_dir.exists():
-        print("Cloning/Copying library to workspace...")
+    lib_repo_dir.parent.mkdir(parents=True, exist_ok=True)
+    chmod_recursive(lib_repo_dir.parent)
 
+    # Copy library
+    if not lib_repo_dir.exists():
+        print("Cloning library...")
         shutil.copytree(library_path, lib_repo_dir, dirs_exist_ok=True)
+        chmod_recursive(lib_repo_dir)
 
     # Start Environment
+    # Mount workspace_dir to /workspace
     async with RustCodingEnvironment(
-        workspace_dir=workspace_dir, image_name=config.image_name
+        workspace_dir=workspace_dir, image_name="coder-mcp"
     ) as runtime:
-        # --- PHASE 1: PLANNING ---
-        plan_path = await generate_curriculum_plan(workspace_dir, model, runtime)
+        semaphore = asyncio.Semaphore(config.max_concurrency)
+        agent = CurriculumAgent(config, model, runtime, semaphore)
 
-        # --- PHASE 1.5: PARSING PLAN ---
-        print("\n--- Phase 1.5: Parsing Plan ---")
-        parser_agent = AgentWrapper[CurriculumPlan].create(
-            name="PlanParser",
-            instructions=PLAN_PARSER_PROMPT,
-            model=model,
-            mcp_servers=[runtime.server],
-            output_type=CurriculumPlan,
+        # Root Task
+        root_instruction = (
+            "Create a comprehensive textbook for the 'numrs' library. "
+            "Start by understanding the high-level architecture and public API surface."
         )
 
-        parse_result = await parser_agent.run(
-            f"Read {plan_path.name} and output the JSON list of chapters.", max_turns=5
+        root_task = TaskQueueItem(
+            instruction=root_instruction, work_dir=workspace_dir / "curriculum", depth=0
         )
 
-        try:
-            plan_obj = parse_result.final_output()
-            chapters = plan_obj.chapters
-            print(f"Parsed {len(chapters)} chapters.")
-        except Exception as e:
-            print(f"Failed to parse plan JSON: {e}")
-            print("Raw output:", parse_result.final_output())
-            return
+        await agent.run_queue(root_task)
 
-        # --- PHASE 2: WRITING CONTENT ---
-        print("\n--- Phase 2: Writing Content ---")
-
-        for chapter in chapters:
-            ch_num = chapter.chapter_number
-            title = chapter.title
-            filename = chapter.filename
-            desc = chapter.description
-
-            target_file = curriculum_out_dir / filename
-            if target_file.exists():
-                print(f"Skipping Chapter {ch_num}: {filename} (Already exists)")
-                continue
-
-            print(f"Writing Chapter {ch_num}: {title} -> {filename}...")
-
-            # Create a fresh writer agent for each chapter to keep context clean
-            writer_instruction = CONTENT_WRITER_PROMPT_TEMPLATE.format(
-                chapter_number=ch_num,
-                title=title,
-                filename=f"curriculum/{filename}",  # Relative to workspace
-                description=desc,
-            )
-
-            writer_agent = AgentWrapper.create(
-                name=f"Writer_Ch{ch_num}",
-                instructions=writer_instruction,
-                model=model,
-                mcp_servers=[runtime.server],
-                # Give enough turns to explore specific files if needed
-                model_settings=ModelSettings(
-                    tool_choice="auto", parallel_tool_calls=True
-                ),
-            )
-
-            # Trigger the writing
-            await writer_agent.run(
-                f"Please write the file `curriculum/{filename}`. "
-                "Make sure to read the relevant source files in `repos/library` first to be accurate.",
-                max_turns=20,
-            )
-
-            print(f"✅ Finished Chapter {ch_num}")
+    print("\n✅ Curriculum Generation Complete!")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
-from typing import TypedDict
 import subprocess
 from pathlib import Path
+from typing import TypedDict
 
 from loguru import logger
 from pydantic import BaseModel
@@ -63,12 +63,7 @@ class GitRepository(BaseModel):
         return self.local_dir.exists()
 
     def chmod_777(self) -> None:
-        """Apply chmod -R 777 to the repository directory."""
-        logger.debug(f"Applying chmod -R 777 to {self.local_dir}")
-        try:
-            subprocess.run(["chmod", "-R", "777", str(self.local_dir)], check=True)
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to apply chmod -R 777: {e.stderr or e.stdout}")
+        chmod_recursive(self.local_dir)
 
     def remove_non_primary(self) -> None:
         """Remove main or master branches if they exist and are not the current branch."""
@@ -97,3 +92,11 @@ class GitRepository(BaseModel):
 
 class GitRepositoryDict(TypedDict):
     local_dir: Path
+
+
+def chmod_recursive(path: Path, mode: int = 0o777) -> None:
+    # 自分自身を含め、配下のすべてのパスを対象にする
+    for p in path.rglob("*"):
+        p.chmod(mode)
+    # 親ディレクトリ自体の権限も変更する場合
+    path.chmod(mode)
