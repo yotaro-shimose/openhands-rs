@@ -321,7 +321,7 @@ async def main():
             print(f"Parsed {len(chapters)} chapters.")
         except Exception as e:
             print(f"Failed to parse plan JSON: {e}")
-            print("Raw output:", parse_result.result.final_output)
+            print("Raw output:", parse_result.final_output())
             return
 
         # --- PHASE 2: WRITING CONTENT ---
