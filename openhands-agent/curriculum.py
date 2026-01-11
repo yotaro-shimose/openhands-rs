@@ -42,8 +42,6 @@ Create a file named `curriculum_plan.md` in the current directory.
 </INSTRUCTIONS>
 """
 
-# Prompt to parse the markdown plan into a machine-readable JSON list of chapters
-# Prompt to parse the markdown plan into a machine-readable JSON list of chapters
 PLAN_PARSER_PROMPT = """You are a helper agent. 
 Read the file `curriculum_plan.md`. 
 Extract the list of chapters defined in the plan.

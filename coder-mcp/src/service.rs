@@ -20,7 +20,6 @@ use crate::tools::file_ops::{
 };
 use crate::tools::glob::{run_glob, GlobArgs};
 use crate::tools::grep::{run_grep, GrepArgs};
-use crate::tools::task_tracker::{run_task_tracker, TaskTrackerArgs};
 
 #[derive(Clone)]
 pub struct CoderMcpService {
@@ -69,18 +68,6 @@ impl CoderMcpService {
         Parameters(args): Parameters<GrepArgs>,
     ) -> Result<CallToolResult, McpError> {
         let output = run_grep(&args, &self.workspace_dir)?;
-        Ok(CallToolResult::success(vec![Content::text(output)]))
-    }
-
-    #[tool(
-        name = "task_tracker",
-        description = "Track and manage tasks. Command 'view' shows current tasks. 'plan' updates tasks."
-    )]
-    async fn task_tracker(
-        &self,
-        Parameters(args): Parameters<TaskTrackerArgs>,
-    ) -> Result<CallToolResult, McpError> {
-        let output = run_task_tracker(&args, &self.workspace_dir)?;
         Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 

@@ -1,15 +1,15 @@
 import asyncio
-
 import os
 import uuid
 from pathlib import Path
 
 from agents.extensions.models.litellm_model import LitellmModel
 from oai_utils.agent import AgentWrapper
+from pydantic import BaseModel, Field
+
 from openhands_agent.async_util import gather_with_semaphore
 from openhands_agent.runtime.rust_env import RustCodingEnvironment
 from openhands_agent.runtime.temp_workspace import TempWorkspace
-from pydantic import BaseModel, Field
 
 # --- PYDANTIC MODELS ---
 
@@ -260,11 +260,7 @@ async def main():
 
     # Path validation
     if not library_path.exists():
-        # Fallback logic removed/simplified as per strict config usage,
-        # or we could keep it if we want to search.
-        # But config usually implies explicit paths.
         print(f"Error: Library not found at {library_path}")
-        # Optional checks for defaults if user runs from unexpected CWD
         return
 
     if not curriculum_src.exists():
