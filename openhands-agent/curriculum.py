@@ -27,7 +27,7 @@ Your goal is to explore the provided Rust library and generate a **Comprehensive
 
 <INPUT_FORMAT>
 The user will provide:
-1. **Task Instruction**: The original instruction for this exploration.
+1. **Task Instruction**: The original instruction for this exploration. This may contain hierarchical context (e.g., "In the context of [Parent Topic], cover [This Topic]").
 2. **Output Directory**: The directory where you should operate and save your output.
 3. **Library Path**: The library is located at `/workspace/repos/library`.
 </INPUT_FORMAT>
@@ -70,7 +70,10 @@ The user will provide:
 
 - **Split (Delegate)**:
   - If the topic covers multiple distinct sub-modules or concepts that deserve their own chapters/sections.
-  - Create a list of sub-tasks. Each sub-task needs a directory name and a specific instruction.
+  - Create a list of sub-tasks. Each sub-task needs a directory name and a **specific instruction**.
+  - **High-Context Instructions**: Each sub-task MUST have an instruction that clearly states:
+    a. **Hierarchy**: Which part of the parent topic/chapter this sub-task belongs to.
+    b. **Scope**: What specific aspects (modules, structs, functions) should be covered clearly.
   
 - **Write (Leaf)**:
   - If the topic is atomic enough to be explained in one cohesive markdown file (e.g., 200-1000 lines of text/code).
@@ -87,11 +90,11 @@ The user will provide:
   "sub_tasks": [
     {
       "directory_name": "chapter_01_basics",
-      "instruction": "Cover the basic types and syntax."
+      "instruction": "In the context of the 'Core Fundamentals' chapter, cover the basic types and syntax found in `src/types.rs`. Focus on the `Tensor` and `Scalar` structs."
     },
     {
       "directory_name": "chapter_02_advanced",
-      "instruction": "Deep dive into advanced features."
+      "instruction": "In the context of the 'Core Fundamentals' chapter, deep dive into advanced features like 'Automatic Differentiation'. Cover the `Tape` and `Gradient` traits."
     }
   ],
   "final_file_name": null
