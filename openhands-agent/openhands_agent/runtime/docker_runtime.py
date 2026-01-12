@@ -1,14 +1,13 @@
-from typing import Self
 import asyncio
-import subprocess
 import time
 import uuid
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Self
 from urllib.request import urlopen
 
 from agents.mcp import MCPServerStreamableHttp
 
+from openhands_agent.exam.repository import chmod_recursive
 from openhands_agent.runtime import Runtime
 
 
@@ -70,10 +69,7 @@ class DockerRuntime(Runtime):
 
     async def __aenter__(self) -> Self:
         # 0. Ensure workspace_dir is world-writable for the container user (recursive)
-        try:
-            subprocess.run(["chmod", "-R", "777", str(self.workspace_dir)], check=True)
-        except Exception as e:
-            raise RuntimeError(f"Failed to recursive chmod {self.workspace_dir}: {e}")
+        chmod_recursive(self.workspace_dir)
 
         # 1. Verify image exists
         proc = await asyncio.create_subprocess_exec(
@@ -172,10 +168,11 @@ class DockerRuntime(Runtime):
 
         # 4. Wait for healthy
         await self._wait_for_health()
+        return self
 
-        # 5. Return MCP server instance
+    def coder_mcp(self) -> MCPServerStreamableHttp:
         mcp_url = f"http://localhost:{self.host_port}/mcp"
-        self._mcp_server = MCPServerStreamableHttp(
+        return MCPServerStreamableHttp(
             name="Docker MCP Server",
             params={
                 "url": mcp_url,
@@ -185,14 +182,6 @@ class DockerRuntime(Runtime):
             # Allow long-running commands (e.g., cargo build, rustup) up to 5 minutes
             client_session_timeout_seconds=300,
         )
-        await self._mcp_server.__aenter__()
-        return self
-
-    @property
-    def server(self) -> MCPServerStreamableHttp:
-        if not hasattr(self, "_mcp_server") or not self._mcp_server:
-            raise RuntimeError("DockerRuntime not started (use async with)")
-        return self._mcp_server
 
     async def _wait_for_health(self, timeout: float = 30.0):
         """Wait for the server to respond to health checks."""
@@ -230,8 +219,6 @@ class DockerRuntime(Runtime):
         raise RuntimeError("Server failed to become healthy in time.")
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if hasattr(self, "_mcp_server"):
-            await self._mcp_server.__aexit__(exc_type, exc_val, exc_tb)
         if self._container_id:
             print(
                 f"🛑 Stopping and removing Docker container '{self.container_name}'..."

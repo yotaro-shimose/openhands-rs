@@ -1,7 +1,6 @@
 import asyncio
 import os
 import shutil
-import traceback
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,14 +22,12 @@ from openhands_agent.runtime.rust_env import RustCodingEnvironment
 EXPLORER_PROMPT = """You are an expert Rust Researcher and Curriculum Architect.
 Your goal is to explore the provided Rust library and generate a **Comprehensive Summary** for a specific topic as part of a **hierarchical textbook generation process**.
 
-**NOTE**: Your current working directory is `/workspace`. However, you must create all your output files in the **Output Directory** specified below.
-
-<INPUT_FORMAT>
-The user will provide:
-1. **Task Instruction**: The original instruction for this exploration.
-2. **Output Directory**: The directory where you should operate and save your output.
-3. **Library Path**: The library is located at `/workspace/repos/library`.
-</INPUT_FORMAT>
+<INPUT>
+- **Task Instruction**: {instruction}
+- **Scope**: The directory or concept you are assigned to.
+- **Library Path**: /workspace/repos/library
+- **Working Directory**: {work_dir}
+</INPUT>
 
 <INSTRUCTIONS>
 1. **Explore Hierarchically**:
@@ -38,17 +35,43 @@ The user will provide:
    - **Do not dive into implementation details** of sub-modules or complex functions unless the **Task Instruction** explicitly asks for a deep dive into a specific API or concept.
    - Identify the main components (modules, structs, traits) and their relationships.
    - You can look at `README.md`, `examples/`, and top-level module files (e.g., `lib.rs`, `mod.rs`).
-2. **Summarize and Self-Review**:
-   - Create a detailed summary named `comprehensive_summary.md` in your **Output Directory**.
+2. **Summarize**:
+   - Create a detailed summary named `comprehensive_summary.md` in your Working Directory.
    - This summary must list the public API surface, key concepts, and usage patterns *at this level*.
    - If the topic is broad (e.g., the whole library or a large module), list the sub-components that should be explored further.
-   - **Critically Review**: After generating the summary, compare it against the **Task Instruction**. 
-   - If you identify missing parts or areas for improvement, **edit `comprehensive_summary.md`** until it is truly comprehensive.
-3. **Finish**:
-   - Once you are confident that `comprehensive_summary.md` covers all aspects of the given topic, simply say `finished` to stop. You do not need to provide a separate summary of your actions once you are done.
+   - It serves as the "knowledge base" for a Manager to decide whether to split this topic into smaller chapters or write it as a final leaf content.
 </INSTRUCTIONS>
 """
 
+EVALUATOR_PROMPT = """You are a rigorous Curriculum Auditor.
+Your job is to verify that the `comprehensive_summary.md` is truly comprehensive and accurate regarding the codebase.
+
+<INPUT>
+The user will provide:
+1. **Instruction**: The original task instruction.
+2. **Summary Content**: The content of the generated summary.
+3. **Library Path**: /workspace/repos/library
+</INPUT>
+
+<INSTRUCTIONS>
+1. **Verify**: Check if the summary misses any public structs, enums, or functions that are relevant to the provided **Instruction**.
+2. **Evaluate**:
+   - If significant concepts are missing or incorrect, set `is_comprehensive` to False and provide specific `feedback`.
+   - If the summary seems to hallucinates concepts not in the library, set `is_comprehensive` to False and provide feedback.
+   - If the summary is excellent (covers >95% of the relevant scope), set `is_comprehensive` to True.
+3. **Format**:
+   - You must output **ONLY** the JSON object.
+   - **ABSOLUTELY NO** introductory text, no "thought:", no markdown backticks.
+   - Start immediately with `{`.
+</INSTRUCTIONS>
+
+<EXAMPLE_OUTPUT>
+{
+  "is_comprehensive": false,
+  "feedback": "The summary is missing details about the `Foo` struct and its `bar` method."
+}
+</EXAMPLE_OUTPUT>
+"""
 
 DISPATCHER_PROMPT = """You are a Curriculum Manager.
 Your goal is to decide how to process the current task based on the provided instruction and the content of `comprehensive_summary.md`.
@@ -112,9 +135,9 @@ Your goal is to write a high-quality educational markdown file for the current t
 2. The content should be a textbook-style explanation.
 3. **Include**:
    - Explanations of concepts.
-   - Runnable Rust code snippets whenever appropriate (verify against the library).
+   - Runnable Rust code snippets (verify against the library).
    - Expected output.
-   - The path to the source code/document of the library.
+   - Best practices.
 </INSTRUCTIONS>
 """
 
@@ -148,10 +171,11 @@ class DecisionResult(BaseModel):
 class CurriculumConfig(BaseModel):
     curriculum_id: str = Field(default="generated_textbook")
     model_name: str = Field(default="gemini/gemini-3-flash-preview")
+    evaluator_model_name: str = Field(default="gemini/gemini-3-flash-preview")
     workspace_dir: Path = Field(default=Path("workspace_curriculum_hierarchical"))
     repository_path: Path = Field(default=Path("repositories/numrs"))
     max_concurrency: int = Field(default=20)
-    max_depth: int = Field(default=4)
+    max_depth: int = Field(default=3)
 
     def get_workspace_dir(self) -> Path:
         return self.workspace_dir.resolve()
@@ -172,11 +196,13 @@ class CurriculumAgent:
         self,
         config: CurriculumConfig,
         model: AgentsSDKModel,
+        evaluator_model: AgentsSDKModel,
         runtime: RustCodingEnvironment,
         semaphore: asyncio.Semaphore,
     ):
         self.config = config
         self.model = model
+        self.evaluator_model = evaluator_model
         self.runtime = runtime
         self.semaphore = semaphore
 
@@ -191,6 +217,8 @@ class CurriculumAgent:
     async def run_queue(self, root_task: TaskQueueItem):
         queue = deque([root_task])
         running_tasks = set()
+
+        import traceback
 
         # Loop until no tasks are left in queue AND no tasks are currently running
         while queue or running_tasks:
@@ -298,22 +326,27 @@ class CurriculumAgent:
     ):
         print("  > Exploring...")
 
-        prompt = EXPLORER_PROMPT
+        prompt = EXPLORER_PROMPT.format(
+            instruction=instruction, work_dir=container_work_dir
+        )
 
         # Generator - Evaluator Loop
         max_retries = 3
-        current_feedback = None
+        current_feedback = ""
+
         explorer_history = []
+
         for i in range(max_retries):
             # 1. Generate
-            if current_feedback is None:
+            if not current_feedback:
                 user_msg = (
-                    f"Generate in {container_work_dir / 'comprehensive_summary.md'}.\n\n"
-                    f"**Task Instruction**: {instruction}\n"
-                    f"**Output Directory**: {container_work_dir}"
+                    f"Generate in {container_work_dir / 'comprehensive_summary.md'}. "
                 )
             else:
-                user_msg = current_feedback
+                user_msg = (
+                    f"Edit {container_work_dir / 'comprehensive_summary.md'} "
+                    f"to improve the summary based on the following feedback: {current_feedback}"
+                )
 
             explorer_history.extend(contents2params("user", [user_msg]))
             async with self.runtime.coder_mcp() as coder_mcp:
@@ -328,9 +361,44 @@ class CurriculumAgent:
 
             summary_file = work_dir / "comprehensive_summary.md"
             if not summary_file.exists():
-                current_feedback = f"❌ Could not find {summary_file}"
+                print(f"  ❌ Summary generation failed in {summary_file}")
+                current_feedback = f"❌ Summary generation failed in {summary_file}"
                 # Retry if failure
                 continue
+
+            # 2. Evaluate
+            summary_content = summary_file.read_text()
+
+            async with self.runtime.coder_mcp() as coder_mcp:
+                evaluator = AgentWrapper[EvaluationResult].create(
+                    name=f"Evaluator-{work_dir.name}",
+                    instructions=EVALUATOR_PROMPT,
+                    model=self.evaluator_model,
+                    mcp_servers=[coder_mcp],
+                    output_type=EvaluationResult,
+                )
+
+                user_msg = f"""
+Please evaluate the following summary against the library at /workspace/repos/library.
+
+**Instruction**:
+{instruction}
+
+**Summary Content**:
+{summary_content}
+"""
+                eval_resp = await evaluator.run(
+                    user_msg,
+                    max_turns=40,
+                )
+            result = eval_resp.final_output()
+
+            if result.is_comprehensive:
+                print(f"  ✅ Summary verified for {work_dir.name}")
+                break
+
+            current_feedback = result.feedback
+            print(f"  ⚠️ Summary critique: {current_feedback[:50]}...")
 
     async def _phase_decide(
         self, instruction: str, work_dir: Path, container_work_dir: Path
@@ -411,6 +479,7 @@ async def main():
 
     # Initialize Model
     model = LitellmModel(model=config.model_name, api_key=api_key)
+    evaluator_model = LitellmModel(model=config.evaluator_model_name, api_key=api_key)
 
     print(f"Initializing Queue-based Curriculum Agent with model: {config.model_name}")
     print(f"Library: {library_path}")
@@ -441,6 +510,7 @@ async def main():
         agent = CurriculumAgent(
             config=config,
             model=model,
+            evaluator_model=evaluator_model,
             runtime=runtime,
             semaphore=semaphore,
         )

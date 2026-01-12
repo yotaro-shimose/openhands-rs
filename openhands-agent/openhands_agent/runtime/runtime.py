@@ -26,12 +26,6 @@ class Runtime(ABC):
         """Exit runtime context and cleanup."""
         pass
 
-    @property
-    @abstractmethod
-    def server(self) -> MCPServerStreamableHttp:
-        """The underlying MCP server provided by this runtime."""
-        pass
-
 
 class LocalRuntime(Runtime):
     """Runtime that connects to a local MCP server.
@@ -78,8 +72,12 @@ class LocalRuntime(Runtime):
         if self._mcp_server:
             await self._mcp_server.__aexit__(exc_type, exc_val, exc_tb)
 
-    @property
-    def server(self) -> MCPServerStreamableHttp:
-        if not self._mcp_server:
-            raise RuntimeError("LocalRuntime not started (use async with)")
-        return self._mcp_server
+    def coder_mcp(self) -> MCPServerStreamableHttp:
+        return MCPServerStreamableHttp(
+            name="Local MCP Server",
+            params={
+                "url": self.url,
+                "timeout": self.timeout,
+            },
+            cache_tools_list=False,
+        )
