@@ -1,4 +1,3 @@
-pub mod file_editor;
-pub mod file_ops;
+pub mod file_tools;
 pub mod glob;
 pub mod grep;
