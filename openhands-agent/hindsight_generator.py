@@ -1,13 +1,18 @@
+from oai_utils.agent import AgentRunFailure
 import asyncio
 import os
 import uuid
+from itertools import chain
 from pathlib import Path
 
 from agents.extensions.models.litellm_model import LitellmModel
-from oai_utils.agent import AgentWrapper
+from agents.tracing import add_trace_processor
+from oai_utils.agent import AgentsSDKModel, AgentWrapper
+from oai_utils.tracing import AgentContentPrinter
 from pydantic import BaseModel, Field
 
 from openhands_agent.async_util import gather_with_semaphore
+from openhands_agent.runtime.docker_runtime import DockerRuntime
 from openhands_agent.runtime.rust_env import RustCodingEnvironment
 from openhands_agent.runtime.temp_workspace import TempWorkspace
 
@@ -16,7 +21,11 @@ from openhands_agent.runtime.temp_workspace import TempWorkspace
 
 class HindsightConfig(BaseModel):
     experiment_id: str = Field(
-        default="experiment_generic", description="ID for the experiment/output folder"
+        default="experiment_generic_aligned",
+        description="ID for the experiment/output folder",
+    )
+    library_name: str = Field(
+        default="numrs", description="Name of the library (e.g., 'numrs')"
     )
     model_name: str = Field(
         default="gemini/gemini-3-flash-preview", description="LLM model name"
@@ -27,7 +36,7 @@ class HindsightConfig(BaseModel):
         description="Path to the source library to learn from",
     )
     curriculum_dir: Path = Field(
-        default=Path("workspace_curriculum/curriculum"),
+        default=Path("workspace_curriculum_hierarchical/curriculum"),
         description="Path to the generated curriculum markdown files",
     )
     boilerplate_dir: Path = Field(
@@ -43,7 +52,7 @@ class HindsightConfig(BaseModel):
         description="Docker image to use",
     )
     max_concurrent_tasks: int = Field(
-        default=5, description="Number of concurrent generation agents"
+        default=10, description="Number of concurrent generation agents"
     )
 
     def get_library_path(self) -> Path:
@@ -59,7 +68,17 @@ class HindsightConfig(BaseModel):
         return (self.output_base_dir / self.experiment_id).resolve()
 
 
-class Teachable(BaseModel):
+def load_curriculum_mdfiles(curriculum_path: Path) -> list[Path]:
+    return sorted(
+        [
+            p
+            for p in curriculum_path.glob("**/*.md")
+            if p.name not in set(["comprehensive_summary.md", "instruction.md"])
+        ]
+    )
+
+
+class TeachableItem(BaseModel):
     slug: str = Field(
         description="A short, url-friendly identifier (e.g., 'broadcast_ops')."
     )
@@ -69,7 +88,11 @@ class Teachable(BaseModel):
 
 
 class TeachablesList(BaseModel):
-    items: list[Teachable] = Field(description="List of extracted teachables.")
+    items: list[TeachableItem] = Field(description="List of extracted teachables.")
+
+
+class Teachable(TeachableItem):
+    chapter: str = Field(description="The chapter this teachable belongs to.")
 
 
 class QRAContent(BaseModel):
@@ -83,7 +106,6 @@ class QRAContent(BaseModel):
 class HindsightOutput(BaseModel):
     id: str
     slug: str
-    chapter: str
     concept: str
     question: str
     reasoning: str
@@ -93,7 +115,7 @@ class HindsightOutput(BaseModel):
 # --- PROMPTS ---
 
 TOPIC_EXTRACTOR_PROMPT = """You are an expert Technical Curriculum Architect.
-Your goal is to extract "Teachables" from a given curriculum chapter for the `numrs` Rust library.
+Your goal is to extract "Teachables" from a given curriculum chapter for the `{library_name}` Rust library.
 
 <INSTRUCTIONS>
 1. Read the provided chapter content.
@@ -105,48 +127,54 @@ Your goal is to extract "Teachables" from a given curriculum chapter for the `nu
 </INSTRUCTIONS>
 """
 
-QRA_GENERATOR_PROMPT = """You are an expert Rust Developer and Technical Writer who has internalized the `numrs` library.
+QRA_GENERATOR_PROMPT = """You are an expert Rust Developer and Technical Writer who has internalized the `{library_name}` library.
 Your task is to create a verified QRA (Question, Reasoning, Answer) triplet for a specific concept.
 
 <CONTEXT>
-Library: `numrs`
-Concept: {description}
+Library: `{library_name}`
+Detailed context about the library and the specific concept is provided in the input message.
 </CONTEXT>
 
-<GOAL>
-1. **Design a Question**: A practical coding challenge OR a conceptual question.
-2. **Verify Solution (Agentic Loop)**:
-    - **Verification Rule**: If your intended Answer includes ANY Rust code snippet (even for conceptual explanations), you MUST verify it.
-        - You MUST write a verification script (e.g. `src/bin/verify_x.rs`) using the `write_to_file` tool.
-        - You MUST run it using `run_command` (e.g. `cargo run --bin verify_x`).
-        - You MUST fix any compilation/runtime errors until it passes.
-    - If the answer is purely text, verification is mental/conceptual.
-3. **Draft Output**:
-    - **Reasoning**: Write as an expert recalling knowledge ("To solve this, we use..."). Mention you wrote a script to check your memory if verification was performed.
-    - **Answer**: The final natural answer.
-</GOAL>
+<TASK_PROGRESSION>
+1. **Content Design**: Create a practical coding challenge or a conceptual question based on the provided concept and chapter context. To ensure the question is self-contained for future training, it must explicitly mention the `{library_name}` library by name (e.g., "In `{library_name}`, how do I..." or "Explain the benefit of X in `{library_name}`").
 
-<IMPORTANT>
-Your final response MUST be a pure JSON object corresponding to the QRAContent schema.
-Do NOT include any conversational filler like "Here is the JSON:", "I have verified...", or "thought:".
-Do NOT use markdown fencing for the JSON (no ```json ... ```), just the raw JSON object.
-</IMPORTANT>
+2. **Technical Verification**:
+    - If your answer includes any Rust code snippets, you must verify them using an agentic loop.
+    - Write a verification script (e.g., `src/bin/verify_x.rs`) using `write_to_file`.
+    - Execute it with `run_command` (e.g., `cargo run --bin verify_x`).
+    - Resolve any compilation or runtime errors until the solution is perfectly verified.
+    - For purely conceptual text answers, verification is mental.
+
+3. **Expert Drafting**:
+    - **Reasoning**: Explain your internal technical logic and best practices from the perspective of an expert who already knows the library well.
+    - **Answer**: Provide the final, naturally phrased technical answer.
+</TASK_PROGRESSION>
+
+<GUIDELINE>
+- Internalization: Act as if the knowledge is internalized; never mention searching, documentation, 
+    discovery, or the verification process (e.g., do NOT say "I found that..." 
+    or "The code compiled successfully") for both reasoning and answer.
+- The reasoning should start from user intent analysis
+</GUIDELINE>
+
+<ENVIRONMENT>
+Commands should be executed in the current working directory, which is always `/workspace`.
+</ENVIRONMENT>
 """
 
 
 async def generate_qra_task(
     teachable: Teachable,
-    chapter_slug: str,
     output_dir: Path,
-    model_name: str,
-    api_key: str,
+    model: AgentsSDKModel,
     boilerplate_dir: Path,
     library_path: Path,
     curriculum_src: Path,
     image_name: str,
+    library_name: str,
 ):
     # Deterministic UUID for the task
-    task_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, f"{chapter_slug}_{teachable.slug}")
+    task_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, f"{teachable.slug}")
     output_file = output_dir / f"{task_uuid}.json"
 
     if output_file.exists():
@@ -167,30 +195,41 @@ async def generate_qra_task(
             injections=injections,
             prefix=f"hindsight_{teachable.slug}_",
         ) as sandbox_dir:
-            # Initialize Model per task (lightweight wrapper)
-            model = LitellmModel(model=model_name, api_key=api_key)
-
             async with RustCodingEnvironment(
                 workspace_dir=sandbox_dir, image_name=image_name
             ) as runtime:
                 # The workspace inside the container is /workspace
-                playground_path = "/workspace"
-
-                generator_agent = AgentWrapper[QRAContent].create(
-                    name=f"QRA_Architect_{teachable.slug}",
-                    instructions=QRA_GENERATOR_PROMPT.format(
-                        description=teachable.description
+                async with runtime.coder_mcp() as coder_mcp:
+                    generator_agent = AgentWrapper[QRAContent].create(
+                        name=f"QRA_Architect_{teachable.slug}",
+                        instructions=QRA_GENERATOR_PROMPT.format(
+                            library_name=library_name
+                        ),
+                        model=model,
+                        mcp_servers=[coder_mcp],
+                        output_type=QRAContent,
                     )
-                    + f"\n\nIMPORTANT: Working Directory for commands is `{playground_path}`.",
-                    model=model,
-                    mcp_servers=[runtime.server],
-                    output_type=QRAContent,
-                )
 
-                result = await generator_agent.run(
-                    "Create the verified QRA. Use tools to verify code if needed.",
-                    max_turns=30,
-                )
+                    prompt = f"""Create a verified QRA for the following concept.
+
+<CONCEPT>
+{teachable.description}
+</CONCEPT>
+
+<CHAPTER_CONTEXT>
+{teachable.chapter}
+</CHAPTER_CONTEXT>
+
+Please use tools to verify your code solution if it contains any Rust snippets.
+"""
+                    try:
+                        result = await generator_agent.run(
+                            prompt,
+                            max_turns=30,
+                        )
+                    except AgentRunFailure as e:
+                        print(f"AgentRunFailure: {e}")
+                        return
 
                 final_obj = result.final_output()
 
@@ -198,7 +237,6 @@ async def generate_qra_task(
                 output_model = HindsightOutput(
                     id=str(task_uuid),
                     slug=teachable.slug,
-                    chapter=chapter_slug,
                     concept=teachable.description,
                     question=final_obj.question,
                     reasoning=final_obj.reasoning,
@@ -214,8 +252,11 @@ async def generate_qra_task(
 
 
 async def extract_from_chapter(
-    chapter_file: Path, model: LitellmModel
-) -> list[tuple[Teachable, str]]:
+    chapter_file: Path,
+    model: AgentsSDKModel,
+    runtime: DockerRuntime,
+    library_name: str,
+) -> list[Teachable]:
     if chapter_file.name.startswith("00_"):
         return []
 
@@ -223,28 +264,60 @@ async def extract_from_chapter(
     content = chapter_file.read_text()
 
     # Extract Teachables
-    extractor_agent = AgentWrapper[TeachablesList].create(
-        name="TopicExtractor",
-        instructions=TOPIC_EXTRACTOR_PROMPT,
-        model=model,
-        output_type=TeachablesList,
-    )
-
-    try:
-        extract_result = await extractor_agent.run(
-            f"Extract teachables from this chapter:\n\n{content}", max_turns=5
+    async with runtime.coder_mcp() as coder_mcp:
+        extractor_agent = AgentWrapper[TeachablesList].create(
+            name="TopicExtractor",
+            instructions=TOPIC_EXTRACTOR_PROMPT.format(library_name=library_name),
+            model=model,
+            mcp_servers=[coder_mcp],
+            output_type=TeachablesList,
         )
-        teachables = extract_result.result.final_output.items
-        print(f"  Found {len(teachables)} teachables in {chapter_file.name}.")
 
-        return [(t, chapter_file.stem) for t in teachables]
+        try:
+            extract_result = await extractor_agent.run(
+                f"Extract teachables from this chapter:\n\n{content}", max_turns=5
+            )
+            teachables = [
+                Teachable(slug=item.slug, description=item.description, chapter=content)
+                for item in extract_result.final_output().items
+            ]
 
-    except Exception as e:
-        print(f"Failed to extract info from {chapter_file.name}: {e}")
-        return []
+            print(f"  Found {len(teachables)} teachables in {chapter_file.name}.")
+
+            return teachables
+
+        except Exception as e:
+            print(f"Failed to extract info from {chapter_file.name}: {e}")
+            return []
+
+
+async def extract_teachables(
+    chapter_files: list[Path],
+    library_path: Path,
+    model: AgentsSDKModel,
+    max_concurrent: int,
+    library_name: str,
+):
+    injections = {
+        library_path: "repos/library",
+    }
+
+    # Create extraction tasks
+    with TempWorkspace(injections=injections) as sandbox_dir:
+        async with DockerRuntime(workspace_dir=sandbox_dir) as runtime:
+            extraction_tasks = [
+                extract_from_chapter(chapter_file, model, runtime, library_name)
+                for chapter_file in chapter_files
+            ]
+            results = await gather_with_semaphore(
+                extraction_tasks, max_concurrent=max_concurrent
+            )
+
+    return results
 
 
 async def main():
+    add_trace_processor(AgentContentPrinter())
     config = HindsightConfig()
 
     api_key = os.environ.get("GOOGLE_API_KEY")
@@ -279,36 +352,31 @@ async def main():
     print(f"Initializing Hindsight Generator (Config: {config.experiment_id})...")
 
     # List curriculum files
-    chapters = sorted(list(curriculum_src.glob("*.md")))
-    all_tasks = []
-
-    # Create extraction tasks
-    extraction_tasks = [
-        extract_from_chapter(chapter_file, model) for chapter_file in chapters
-    ]
+    chapters = load_curriculum_mdfiles(curriculum_src)
 
     print(f"Extracting teachables from {len(chapters)} chapters concurrently...")
-    results = await gather_with_semaphore(
-        extraction_tasks, max_concurrent=config.max_concurrent_tasks
+    results = await extract_teachables(
+        chapter_files=chapters,
+        library_path=library_path,
+        model=model,
+        max_concurrent=config.max_concurrent_tasks,
+        library_name=config.library_name,
     )
 
-    # Flatten results
-    for res in results:
-        all_tasks.extend(res)
+    teachables = list(chain.from_iterable(results))
 
     tasks = [
         generate_qra_task(
             teachable=t,
-            chapter_slug=c_slug,
             output_dir=output_dir,
-            model_name=config.model_name,
-            api_key=api_key,
+            model=model,
             boilerplate_dir=boilerplate_dir,
             library_path=library_path,
             curriculum_src=curriculum_src,
             image_name=config.image_name,
+            library_name=config.library_name,
         )
-        for t, c_slug in all_tasks
+        for t in teachables
     ]
 
     # Run in parallel with semaphore

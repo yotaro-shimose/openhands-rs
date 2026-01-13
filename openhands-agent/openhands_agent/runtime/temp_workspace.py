@@ -8,7 +8,7 @@ from typing import Dict, Optional
 class TempWorkspace:
     def __init__(
         self,
-        template_dir: Path,
+        template_dir: Path | None = None,
         injections: Optional[Dict[Path, str]] = None,
         prefix: str = "workspace_",
         copy_method: str = "copy",
@@ -30,9 +30,8 @@ class TempWorkspace:
         # 1. Create Temp Directory
         self.temp_dir = Path(tempfile.mkdtemp(prefix=self.prefix))
 
-        # 2. Copy Template
         # 2. Copy Template or Clone
-        if self.template_dir.exists():
+        if self.template_dir is not None and self.template_dir.exists():
             if self.copy_method == "clone":
                 # Use git clone to preserve origin
                 try:

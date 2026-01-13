@@ -29,7 +29,7 @@ class DockerRuntime(Runtime):
 
     def __init__(
         self,
-        workspace_dir: str,
+        workspace_dir: str | Path,
         image_name: str = "coder-mcp",
         container_name: Optional[str] = None,
         host_port: Optional[int] = None,
